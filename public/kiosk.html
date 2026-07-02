@@ -1,0 +1,1433 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AquaPoint - Borne Kiosque</title>
+  <!-- Google Fonts - Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    /* VARIABLES & THEMES */
+    :root {
+      --accent-blue: #1E90FF;
+      --accent-blue-hover: #1572d3;
+      --accent-cyan: #00D2FF;
+      --success-green: #10B981;
+      --error-red: #EF4444;
+      --warning-amber: #F59E0B;
+      
+      /* Dark Theme (Kiosk) */
+      --kiosk-bg: #0A1628;
+      --kiosk-card-bg: rgba(30, 144, 255, 0.05);
+      --kiosk-card-border: rgba(255, 255, 255, 0.1);
+      --kiosk-text: #FFFFFF;
+      --kiosk-text-muted: #8E9BAE;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+      user-select: none;
+    }
+
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--kiosk-bg);
+    }
+
+    /* SCREEN VIEWS */
+    .screen-view {
+      display: none;
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
+    }
+
+    .screen-view.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    #kiosk-screen.active {
+      background-color: var(--kiosk-bg);
+      color: var(--kiosk-text);
+      align-items: center;
+      justify-content: space-between;
+      padding: 40px;
+    }
+
+    /* Kiosk Header */
+    .kiosk-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    
+    .kiosk-logo-drop {
+      color: var(--accent-cyan);
+      font-size: 2.5rem;
+      filter: drop-shadow(0 0 10px rgba(0, 210, 255, 0.5));
+      animation: gentle-bob 3s ease-in-out infinite;
+    }
+
+    .kiosk-brand {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: linear-gradient(135deg, #FFF, var(--accent-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* Kiosk Step Panels */
+    .kiosk-step {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex-grow: 1;
+      width: 100%;
+      max-width: 600px;
+      animation: fade-in 0.4s ease-out forwards;
+    }
+
+    .kiosk-step.active {
+      display: flex;
+    }
+
+    /* --- STEP 1: CARD SCAN --- */
+    .scan-container {
+      position: relative;
+      width: 250px;
+      height: 250px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 30px;
+    }
+
+    .pulse-ring-outer {
+      position: absolute;
+      width: 200px;
+      height: 200px;
+      border: 2px dashed rgba(30, 144, 255, 0.3);
+      border-radius: 50%;
+      animation: rotate-dashed 20s linear infinite;
+    }
+
+    .pulse-ring {
+      position: absolute;
+      width: 160px;
+      height: 160px;
+      border: 4px solid var(--accent-blue);
+      border-radius: 50%;
+      box-shadow: 0 0 30px rgba(30, 144, 255, 0.4);
+      animation: water-pulse 2s infinite ease-out;
+    }
+
+    .pulse-ring-2 { animation-delay: 0.6s; }
+    .pulse-ring-3 { animation-delay: 1.2s; }
+
+    .water-droplet-glow {
+      position: relative;
+      width: 110px;
+      height: 110px;
+      background: radial-gradient(circle, rgba(30, 144, 255, 0.3) 0%, rgba(10, 22, 40, 0.9) 70%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .water-droplet-glow svg {
+      width: 55px;
+      height: 55px;
+      fill: var(--accent-cyan);
+      filter: drop-shadow(0 0 15px var(--accent-blue));
+      animation: pulse-drop 2s ease-in-out infinite;
+    }
+
+    .scan-instruction {
+      font-size: 1.8rem;
+      font-weight: 600;
+      text-align: center;
+      margin-top: 10px;
+      color: var(--kiosk-text);
+      letter-spacing: 0.5px;
+    }
+
+    .scan-subinstruction {
+      font-size: 1.1rem;
+      color: var(--kiosk-text-muted);
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* Simulator Panel */
+    .sim-panel {
+      margin-top: 40px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--kiosk-card-border);
+      padding: 15px;
+      border-radius: 20px;
+      width: 100%;
+      max-width: 450px;
+      text-align: center;
+    }
+
+    .sim-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent-cyan);
+      margin-bottom: 12px;
+    }
+
+    .sim-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .sim-card-btn {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 10px;
+      cursor: pointer;
+      color: white;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .sim-card-btn:hover {
+      background: rgba(30, 144, 255, 0.1);
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .sim-card-btn span {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .sim-card-btn small {
+      font-size: 0.7rem;
+      color: var(--kiosk-text-muted);
+    }
+
+    /* --- STEP 3: WATER SELECTION --- */
+    .selection-container {
+      width: 100%;
+      max-width: 480px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--kiosk-card-border);
+      border-radius: 24px;
+      padding: 30px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      gap: 25px;
+    }
+
+    .client-greeting {
+      text-align: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 15px;
+    }
+
+    .client-name-title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .qty-controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 25px;
+      width: 100%;
+    }
+
+    .qty-btn {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 1px solid var(--accent-blue);
+      background: rgba(30, 144, 255, 0.1);
+      color: white;
+      font-size: 2.2rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .qty-btn:hover { background: var(--accent-blue); }
+    .qty-btn:active { transform: scale(0.9); }
+
+    .qty-value-display {
+      font-size: 4rem;
+      font-weight: 800;
+      min-width: 130px;
+      text-align: center;
+      color: white;
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+    }
+
+    .qty-input {
+      font-size: 3.8rem;
+      font-weight: 800;
+      width: 140px;
+      text-align: center;
+      color: white;
+      background: transparent;
+      border: 2px solid transparent;
+      border-radius: 12px;
+      outline: none;
+      font-family: 'Outfit', sans-serif;
+      transition: all 0.2s ease;
+    }
+    .qty-input:focus {
+      border-color: var(--accent-cyan);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .qty-input::-webkit-outer-spin-button,
+    .qty-input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .qty-input[type=number] {
+      -moz-appearance: textfield;
+    }
+
+    .qty-value-display span {
+      font-size: 2rem;
+      color: var(--accent-cyan);
+      margin-left: 5px;
+    }
+
+    .presets-container {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .preset-btn {
+      flex: 1;
+      padding: 12px 0;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--kiosk-text-muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .preset-btn:hover {
+      border-color: var(--accent-blue);
+      color: white;
+    }
+
+    .preset-btn.active {
+      background: var(--accent-blue);
+      border-color: var(--accent-blue);
+      color: white;
+    }
+
+    .live-cost-box {
+      width: 100%;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 20px;
+    }
+
+    .cost-label {
+      font-size: 0.9rem;
+      color: var(--kiosk-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .cost-value {
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: var(--accent-cyan);
+      margin-top: 2px;
+      text-shadow: 0 0 10px rgba(0, 210, 255, 0.3);
+    }
+
+    /* Confirm button and error */
+    .kiosk-btn-container {
+      width: 100%;
+      max-width: 480px;
+      margin-top: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .confirm-btn {
+      width: 100%;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+      border: none;
+      color: white;
+      padding: 18px;
+      border-radius: 16px;
+      font-size: 1.3rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(30, 144, 255, 0.3);
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .confirm-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(30, 144, 255, 0.5);
+    }
+
+    .confirm-btn:active { transform: translateY(0); }
+    .confirm-btn svg { width: 26px; height: 26px; fill: white; }
+
+    .cancel-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--kiosk-text-muted);
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+    }
+    .cancel-btn:hover {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: var(--error-red);
+    }
+
+    .insufficient-error {
+      width: 100%;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--error-red);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+      font-weight: 600;
+      font-size: 1rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .insufficient-error.visible {
+      display: flex;
+      animation: shake 0.4s ease-in-out;
+    }
+
+    /* --- SUCCESS VIEW OVERLAY --- */
+    .success-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--kiosk-bg);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fade-in 0.3s ease-out forwards;
+    }
+
+    .success-overlay.active {
+      display: flex;
+    }
+
+    .success-circle {
+      width: 100px;
+      height: 100px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 3px solid var(--success-green);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+      margin-bottom: 25px;
+      animation: zoom-in-bounce 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    .success-circle svg {
+      width: 50px;
+      height: 50px;
+      fill: none;
+      stroke: var(--success-green);
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      animation: draw-checkmark 0.6s 0.3s ease-out forwards;
+    }
+
+    .success-title {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: white;
+      margin-bottom: 10px;
+    }
+
+    .success-text {
+      font-size: 1.2rem;
+      color: var(--kiosk-text-muted);
+      text-align: center;
+      max-width: 400px;
+      line-height: 1.5;
+    }
+
+    .success-refill-stats {
+      margin-top: 30px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 20px;
+      padding: 15px 30px;
+      display: flex;
+      gap: 30px;
+      text-align: center;
+    }
+
+    .stat-box-label {
+      font-size: 0.85rem;
+      color: var(--kiosk-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-box-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      margin-top: 5px;
+    }
+
+    .success-countdown {
+      margin-top: 25px;
+      font-size: 1rem;
+      color: var(--kiosk-text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .kiosk-footer {
+      font-size: 0.85rem;
+      color: var(--kiosk-text-muted);
+      margin-bottom: 10px;
+    }
+
+    /* CARD SCAN FLASH OVERLAY */
+    .scan-flash-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: radial-gradient(ellipse at center, rgba(30, 144, 255, 0.35) 0%, transparent 70%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .scan-flash-overlay.flash-active {
+      opacity: 1;
+      animation: scan-burst 0.7s ease-out forwards;
+    }
+
+    .scan-flash-text {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      text-shadow: 0 0 20px var(--accent-cyan);
+      margin-top: 20px;
+    }
+
+    .scan-flash-icon {
+      width: 80px;
+      height: 80px;
+      background: rgba(0, 210, 255, 0.15);
+      border: 3px solid var(--accent-cyan);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 40px rgba(0, 210, 255, 0.6);
+    }
+
+    .scan-flash-icon svg {
+      width: 40px;
+      height: 40px;
+      fill: var(--accent-cyan);
+    }
+
+    .error-toast {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid var(--error-red);
+      color: white;
+      border-radius: 12px;
+      padding: 12px 20px;
+      margin-top: 15px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      display: none;
+      animation: shake 0.4s ease-in-out;
+    }
+
+    /* ===== PIN STEP STYLES ===== */
+    .pin-step-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      animation: fade-in 0.35s ease-out;
+    }
+
+    .pin-user-badge {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .pin-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
+      margin-bottom: 10px;
+      box-shadow: 0 0 0 4px rgba(30,144,255,0.15), 0 0 30px rgba(0,210,255,0.2);
+    }
+
+    .pin-user-name {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--kiosk-text);
+    }
+
+    .pin-label {
+      font-size: 0.82rem;
+      color: var(--kiosk-text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .pin-display {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+
+    .pin-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.2);
+      background: transparent;
+      transition: all 0.2s cubic-bezier(.34,1.56,.64,1);
+    }
+
+    .pin-dot.filled {
+      background: var(--accent-cyan);
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 12px rgba(0,210,255,0.6);
+      transform: scale(1.1);
+    }
+
+    .pin-error {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      display: none;
+      margin-bottom: 18px;
+      animation: shake 0.4s ease-in-out;
+    }
+
+    .pin-keypad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 280px;
+      margin-bottom: 20px;
+    }
+
+    .pin-key {
+      height: 64px;
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.04);
+      color: white;
+      font-size: 1.5rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      font-family: 'Outfit', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .pin-key:hover {
+      background: rgba(30,144,255,0.12);
+      border-color: rgba(30,144,255,0.3);
+      transform: scale(1.04);
+    }
+
+    .pin-key:active { transform: scale(0.94); background: rgba(30,144,255,0.2); }
+
+    .pin-key.key-del {
+      background: rgba(239,68,68,0.06);
+      border-color: rgba(239,68,68,0.18);
+      color: #fca5a5;
+      font-size: 1.2rem;
+    }
+
+    .pin-key.key-del:hover {
+      background: rgba(239,68,68,0.14);
+      border-color: rgba(239,68,68,0.35);
+    }
+
+    .pin-key.key-ok {
+      background: rgba(16,185,129,0.08);
+      border-color: rgba(16,185,129,0.25);
+      color: var(--success-green);
+      font-size: 1.4rem;
+    }
+
+    .pin-key.key-ok:hover {
+      background: rgba(16,185,129,0.18);
+      border-color: rgba(16,185,129,0.45);
+    }
+
+    .pin-back-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--kiosk-text-muted);
+      border-radius: 10px;
+      padding: 8px 22px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: 'Outfit', sans-serif;
+      transition: all 0.2s ease;
+    }
+
+    .pin-back-btn:hover {
+      border-color: rgba(255,255,255,0.2);
+      color: white;
+    }
+
+    /* ANIMATIONS */
+    @keyframes water-pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      100% { transform: scale(1.4); opacity: 0; }
+    }
+
+    @keyframes rotate-dashed {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes pulse-drop {
+      0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px var(--accent-blue)); }
+      50% { transform: scale(1.08); filter: drop-shadow(0 0 20px var(--accent-cyan)); }
+    }
+
+    @keyframes gentle-bob {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-5px); }
+    }
+
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes zoom-in-bounce {
+      0% { transform: scale(0.3); opacity: 0; }
+      50% { transform: scale(1.05); }
+      70% { transform: scale(0.9); }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    @keyframes draw-checkmark {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+
+    @keyframes scan-burst {
+      0%   { opacity: 0; transform: scale(0.8); }
+      20%  { opacity: 1; transform: scale(1); }
+      70%  { opacity: 1; }
+      100% { opacity: 0; transform: scale(1.05); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==================================================== -->
+  <!-- KIOSK SCREEN (DARK THEME)                            -->
+  <!-- ==================================================== -->
+  <main id="kiosk-screen" class="screen-view active">
+    
+    <!-- Kiosk Header -->
+    <header class="kiosk-header">
+      <div class="kiosk-logo-drop">💧</div>
+      <div class="kiosk-brand">AquaPoint</div>
+    </header>
+
+    <!-- STEP 1: SCAN CARD -->
+    <section id="kiosk-step-1" class="kiosk-step active">
+
+      <!-- Card scan flash overlay -->
+      <div class="scan-flash-overlay" id="scan-flash-overlay">
+        <div class="scan-flash-icon">
+          <svg viewBox="0 0 24 24"><path d="M21 18c0 1.1-.9 2-2 2H5c-1.11 0-2-.9-2-2V6c0-1.1.89-2 2-2h14c1.1 0 2 .9 2 2v12zm-2 0V6H5v12h14zm-7-5a2 2 0 1 1-.001-4.001A2 2 0 0 1 12 13z"/></svg>
+        </div>
+        <div class="scan-flash-text">✓ Carte détectée !</div>
+      </div>
+
+      <div class="scan-container">
+        <div class="pulse-ring-outer"></div>
+        <div class="pulse-ring"></div>
+        <div class="pulse-ring pulse-ring-2"></div>
+        <div class="pulse-ring pulse-ring-3"></div>
+        <div class="water-droplet-glow">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+          </svg>
+        </div>
+      </div>
+      
+      <h2 class="scan-instruction">Approchez votre carte</h2>
+      <p class="scan-subinstruction">Présentez votre badge RFID devant le lecteur</p>
+
+      <div class="error-toast" id="scan-error-toast">Carte suspendue ou introuvable</div>
+
+      <!-- RFID Simulator Panel -->
+      <div class="sim-panel">
+        <div class="sim-title">Simuler le scan d'une carte RFID</div>
+        <div class="sim-buttons">
+          <p style="color:var(--kiosk-text-muted); font-size:0.85rem; grid-column: 1/-1;">Chargement des cartes...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP PIN: CODE AUTHENTICATION -->
+    <section id="kiosk-step-pin" class="kiosk-step">
+      <div class="pin-step-wrapper">
+
+        <!-- User identity from scanned card -->
+        <div class="pin-user-badge">
+          <div class="pin-avatar">👤</div>
+          <div class="pin-user-name" id="pin-user-name">Utilisateur</div>
+          <div class="pin-label">Entrez votre code secret</div>
+        </div>
+
+        <!-- 4 dots indicator -->
+        <div class="pin-display">
+          <div class="pin-dot" id="pdot-0"></div>
+          <div class="pin-dot" id="pdot-1"></div>
+          <div class="pin-dot" id="pdot-2"></div>
+          <div class="pin-dot" id="pdot-3"></div>
+        </div>
+
+        <!-- Error message -->
+        <div class="pin-error" id="pin-error-msg">Code PIN incorrect</div>
+
+        <!-- Numeric keypad -->
+        <div class="pin-keypad">
+          <button class="pin-key" onclick="pinKey('1')">1</button>
+          <button class="pin-key" onclick="pinKey('2')">2</button>
+          <button class="pin-key" onclick="pinKey('3')">3</button>
+          <button class="pin-key" onclick="pinKey('4')">4</button>
+          <button class="pin-key" onclick="pinKey('5')">5</button>
+          <button class="pin-key" onclick="pinKey('6')">6</button>
+          <button class="pin-key" onclick="pinKey('7')">7</button>
+          <button class="pin-key" onclick="pinKey('8')">8</button>
+          <button class="pin-key" onclick="pinKey('9')">9</button>
+          <button class="pin-key key-del" onclick="pinDel()">⌫</button>
+          <button class="pin-key" onclick="pinKey('0')">0</button>
+          <button class="pin-key key-ok" onclick="pinSubmit()">&#10003;</button>
+        </div>
+
+        <!-- Cancel -->
+        <button class="pin-back-btn" onclick="pinCancel()">← Annuler</button>
+
+      </div>
+    </section>
+
+    <!-- STEP 2: WATER SELECTION -->
+    <section id="kiosk-step-2" class="kiosk-step">
+      <div class="selection-container">
+        
+        <!-- Welcome banner -->
+        <div class="client-greeting">
+          <p style="font-size: 0.9rem; color: var(--kiosk-text-muted); text-transform: uppercase; letter-spacing: 0.8px;">Bienvenue</p>
+          <div class="client-name-title" id="client-name-display">Client</div>
+
+          <!-- Summary card: Solde & Volume Max selon le solde -->
+          <div class="solde-summary-card" style="margin-top: 14px; background: rgba(30, 144, 255, 0.08); border: 1px solid rgba(0, 210, 255, 0.25); border-radius: 16px; padding: 12px 18px; display: flex; justify-content: space-around; align-items: center; gap: 12px;">
+            <div style="text-align: center;">
+              <span style="font-size: 0.75rem; color: var(--kiosk-text-muted); display: block; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;">SOLDE DISPONIBLE</span>
+              <span id="client-solde-display" style="font-size: 1.25rem; font-weight: 800; color: var(--success-green);">0.000 DT</span>
+            </div>
+            <div style="width: 1px; height: 32px; background: rgba(255,255,255,0.15);"></div>
+            <div style="text-align: center;">
+              <span style="font-size: 0.75rem; color: var(--kiosk-text-muted); display: block; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700;">VOLUME MAX PROPOSÉ</span>
+              <span id="client-max-liters-display" style="font-size: 1.25rem; font-weight: 800; color: var(--accent-cyan);">0 L</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quantity Selection -->
+        <div class="qty-panel" style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+          <p style="font-size: 0.85rem; font-weight: 700; color: var(--kiosk-text-muted); text-transform: uppercase; letter-spacing: 1px;">Quantité d'eau</p>
+          
+          <div class="qty-controls">
+            <button class="qty-btn" onclick="adjustLiters(-10)">−</button>
+            <div class="qty-value-display">
+              <input type="number" id="liters-val" value="10" min="10" oninput="manualLitersInput(this.value)" onblur="validateManualLitersOnBlur(this)" class="qty-input">
+              <span>L</span>
+            </div>
+            <button class="qty-btn" onclick="adjustLiters(10)">+</button>
+          </div>
+
+          <!-- Presets (150 L, 250 L, 300 L, 500 L) -->
+          <div class="presets-container">
+            <button class="preset-btn" id="preset-150" onclick="setPresetLiters(150)">150 L</button>
+            <button class="preset-btn" id="preset-250" onclick="setPresetLiters(250)">250 L</button>
+            <button class="preset-btn" id="preset-300" onclick="setPresetLiters(300)">300 L</button>
+            <button class="preset-btn" id="preset-500" onclick="setPresetLiters(500)">500 L</button>
+          </div>
+
+          <!-- Live Cost -->
+          <div class="live-cost-box">
+            <div class="cost-label">Coût estimé</div>
+            <div class="cost-value" id="live-cost-display">2.000 DT</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="kiosk-btn-container">
+        <div class="insufficient-error" id="insufficient-error">
+          <svg style="width:18px;height:18px;fill:var(--error-red);" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+          </svg>
+          <span id="insufficient-error-txt">Solde insuffisant</span>
+        </div>
+        
+        <button class="confirm-btn" onclick="confirmRefill()">
+          <svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
+          Confirmer la Distribution
+        </button>
+
+        <button class="cancel-btn" onclick="cancelRefill()">Annuler</button>
+      </div>
+    </section>
+
+    <!-- SUCCESS SCREEN OVERLAY -->
+    <div class="success-overlay" id="kiosk-success-overlay">
+      <div class="success-circle">
+        <svg viewBox="0 0 24 24">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+      <h2 class="success-title">Distribution Lancée !</h2>
+      <p class="success-text">L'eau est en cours de distribution. Veuillez patienter.</p>
+      
+      <div class="success-refill-stats">
+        <div>
+          <div class="stat-box-label">Volume</div>
+          <div class="stat-box-value" id="success-liters">0 L</div>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,0.1); height: 40px; align-self: center;"></div>
+        <div>
+          <div class="stat-box-label">Coût débité</div>
+          <div class="stat-box-value" id="success-cost">0.000 DT</div>
+        </div>
+      </div>
+
+      <div class="success-countdown">
+        <span>Retour à l'accueil dans <strong id="countdown-text">3</strong> secondes...</span>
+      </div>
+    </div>
+
+    <!-- Kiosk Footer -->
+    <footer class="kiosk-footer">💧 AquaPoint Kiosk Tablet - Mode Borne</footer>
+  </main>
+
+  <!-- ==================================================== -->
+  <!-- JAVASCRIPT STATE & LOGIC                             -->
+  <!-- ==================================================== -->
+  <script>
+    // Kiosk active state
+    let activeCard = null;
+    let selectedLiters = 150;
+    let pricePerLiter = 0.200;
+    let maxAffordableLiters = 0;
+    let successResetTimer = null;
+
+    // Helper to toggle step views
+    function showKioskStep(step) {
+      document.getElementById("kiosk-step-1").classList.remove("active");
+      document.getElementById("kiosk-step-pin").classList.remove("active");
+      document.getElementById("kiosk-step-2").classList.remove("active");
+      if (step === 'pin') {
+        document.getElementById("kiosk-step-pin").classList.add("active");
+      } else {
+        document.getElementById(`kiosk-step-${step}`).classList.add("active");
+        if (step == 1) loadSimulatorCards();
+      }
+    }
+
+    function loadSimulatorCards() {
+      fetch('index.php?route=api/cards/list')
+        .then(r => r.json())
+        .then(data => {
+          if (data.status === 'success' && data.cards) {
+            const container = document.querySelector('.sim-buttons');
+            if (container) {
+              if (data.cards.length === 0) {
+                container.innerHTML = '<p style="color:var(--kiosk-text-muted); font-size:0.85rem; grid-column: 1/-1;">Aucune carte enregistrée</p>';
+                return;
+              }
+              container.innerHTML = data.cards.map(c => {
+                const isBlocked = (c.statut !== 'active' || c.farmer_statut !== 'actif');
+                const badgeTxt = isBlocked ? 'Bloqué' : 'Actif';
+                const prenom = c.farmer_prenom || 'Client';
+                const nomInitial = c.farmer_nom ? c.farmer_nom.charAt(0) + '.' : '';
+                return `
+                  <button class="sim-card-btn" onclick="simulateCardScan('${c.uid}')">
+                    <span>${prenom} ${nomInitial}</span>
+                    <small style="color: ${isBlocked ? 'var(--error-red)' : 'var(--kiosk-text-muted)'}">${badgeTxt} (${parseFloat(c.solde).toFixed(1)} DT)</small>
+                  </button>
+                `;
+              }).join('');
+            }
+          }
+        })
+        .catch(err => console.error("Erreur chargement cartes simulateur:", err));
+    }
+
+    document.addEventListener('DOMContentLoaded', loadSimulatorCards);
+
+    // Simulate Card Scan RFID using backend API
+    function simulateCardScan(uid) {
+      // Hide previous errors
+      document.getElementById("scan-error-toast").style.display = "none";
+
+      // Trigger swipe animation
+      const flashEl = document.getElementById("scan-flash-overlay");
+      flashEl.classList.add("flash-active");
+
+      // Verify card using backend API
+      fetch(`index.php?route=api/cards/verify&uid=${uid}&borne_id=1`)
+        .then(response => response.json())
+        .then(data => {
+          setTimeout(() => {
+            flashEl.classList.remove("flash-active");
+            if (data.status === "success") {
+              activeCard = data.card;
+              pricePerLiter = data.price_per_litre;
+              maxAffordableLiters = data.max_volume_litres;
+
+              // --- Vérification du solde AVANT d'aller plus loin ---
+              if (activeCard.solde <= 0 || maxAffordableLiters < 1) {
+                const errorToast = document.getElementById("scan-error-toast");
+                errorToast.textContent = `💳 Solde insuffisant — ${parseFloat(activeCard.solde).toFixed(3)} DT disponibles. Veuillez recharger votre carte.`;
+                errorToast.style.display = "block";
+                activeCard = null;
+                return;
+              }
+
+              // Set default volume
+              selectedLiters = Math.min(150, Math.floor(maxAffordableLiters));
+              if (selectedLiters <= 0) selectedLiters = 10;
+
+              if (data.has_pin) {
+                // Card has a PIN → show PIN authentication step
+                document.getElementById("pin-user-name").textContent =
+                  `${activeCard.farmer_prenom} ${activeCard.farmer_nom}`;
+                pinReset();
+                showKioskStep('pin');
+              } else {
+                // No PIN configured → go directly to water selection
+                setupWaterSelectionForSolde();
+                showKioskStep(2);
+              }
+            } else {
+              // Show error message toast on scan screen
+              const errorToast = document.getElementById("scan-error-toast");
+              errorToast.textContent = data.message || "Erreur lors de la lecture de la carte.";
+              errorToast.style.display = "block";
+            }
+          }, 750);
+        })
+        .catch(err => {
+          setTimeout(() => {
+            flashEl.classList.remove("flash-active");
+            const errorToast = document.getElementById("scan-error-toast");
+            errorToast.textContent = "Serveur injoignable.";
+            errorToast.style.display = "block";
+          }, 750);
+        });
+    }
+
+    // ===== PIN FUNCTIONS =====
+    let pinEntry = '';
+    const PIN_LEN = 4;
+
+    function pinKey(digit) {
+      if (pinEntry.length >= PIN_LEN) return;
+      pinEntry += digit;
+      pinUpdateDots();
+      if (pinEntry.length === PIN_LEN) setTimeout(pinSubmit, 180);
+    }
+
+    function pinDel() {
+      pinEntry = pinEntry.slice(0, -1);
+      pinUpdateDots();
+      document.getElementById('pin-error-msg').style.display = 'none';
+    }
+
+    function pinUpdateDots() {
+      for (let i = 0; i < PIN_LEN; i++) {
+        document.getElementById(`pdot-${i}`).classList.toggle('filled', i < pinEntry.length);
+      }
+    }
+
+    function pinReset() {
+      pinEntry = '';
+      pinUpdateDots();
+      document.getElementById('pin-error-msg').style.display = 'none';
+    }
+
+    function pinCancel() {
+      activeCard = null;
+      pinReset();
+      showKioskStep(1);
+    }
+
+    function pinSubmit() {
+      if (pinEntry.length < PIN_LEN) return;
+
+      // Disable keys during verification
+      document.querySelectorAll('.pin-key').forEach(k => k.disabled = true);
+
+      fetch(`index.php?route=api/cards/verify-pin&uid=${encodeURIComponent(activeCard.uid)}&pin=${pinEntry}&borne_id=1`)
+        .then(r => r.json())
+        .then(data => {
+          document.querySelectorAll('.pin-key').forEach(k => k.disabled = false);
+          if (data.status === 'success') {
+            // Mettre à jour les données de la carte avec celles du serveur
+            activeCard = data.card;
+            pricePerLiter = data.price_per_litre;
+            maxAffordableLiters = data.max_volume_litres;
+
+            // --- Vérification du solde après PIN ---
+            if (activeCard.solde <= 0 || maxAffordableLiters < 1) {
+              const err = document.getElementById('pin-error-msg');
+              err.textContent = `💳 Solde insuffisant — ${parseFloat(activeCard.solde).toFixed(3)} DT. Veuillez recharger votre carte.`;
+              err.style.display = 'block';
+              pinEntry = '';
+              pinUpdateDots();
+              return;
+            }
+
+            // PIN ok + solde suffisant → sélection eau
+            setupWaterSelectionForSolde();
+            pinReset();
+            showKioskStep(2);
+          } else {
+            const err = document.getElementById('pin-error-msg');
+            err.textContent = data.message || 'Code PIN incorrect.';
+            err.style.display = 'block';
+            pinEntry = '';
+            pinUpdateDots();
+          }
+        })
+        .catch(() => {
+          document.querySelectorAll('.pin-key').forEach(k => k.disabled = false);
+          const err = document.getElementById('pin-error-msg');
+          err.textContent = 'Serveur injoignable.';
+          err.style.display = 'block';
+          pinEntry = '';
+          pinUpdateDots();
+        });
+    }
+
+    function setupWaterSelectionForSolde() {
+      if (!activeCard) return;
+
+      const maxLitres = Math.floor(maxAffordableLiters);
+
+      // Afficher les infos du client et son solde
+      document.getElementById('client-name-display').textContent =
+        `${activeCard.farmer_prenom} ${activeCard.farmer_nom}`;
+      document.getElementById('client-solde-display').textContent =
+        `${parseFloat(activeCard.solde).toFixed(3)} DT`;
+      document.getElementById('client-max-liters-display').textContent =
+        `${maxLitres} L`;
+
+      // Boutons de raccourcis fixes (150 L, 250 L, 300 L, 500 L)
+      const container = document.querySelector(".presets-container");
+      if (container) {
+        const standardPresets = [150, 250, 300, 500];
+        container.innerHTML = standardPresets.map(liters => {
+          const isDisabled = liters > maxLitres;
+          return `<button class="preset-btn" id="preset-${liters}" onclick="setPresetLiters(${liters})" ${isDisabled ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>${liters} L</button>`;
+        }).join('');
+      }
+
+      // Initialiser la sélection par défaut sans dépasser le solde
+      selectedLiters = Math.min(150, maxLitres);
+      if (selectedLiters <= 0) selectedLiters = Math.min(10, maxLitres);
+      updateLitersDisplay();
+    }
+
+    function adjustLiters(amount) {
+      if (!activeCard) return;
+      const maxLitres = Math.floor(maxAffordableLiters);
+      let newVal = selectedLiters + amount;
+
+      if (newVal > maxLitres) {
+        newVal = maxLitres;
+        const errorEl = document.getElementById("insufficient-error");
+        errorEl.textContent = `Volume max atteint selon votre solde (${maxLitres} L max)`;
+        errorEl.classList.add("visible");
+      } else {
+        document.getElementById("insufficient-error").classList.remove("visible");
+      }
+
+      if (newVal < 10) newVal = Math.min(10, maxLitres);
+      selectedLiters = newVal;
+      updateLitersDisplay();
+    }
+
+    function setPresetLiters(liters) {
+      if (!activeCard) return;
+      const maxLitres = Math.floor(maxAffordableLiters);
+      if (liters > maxLitres) {
+        selectedLiters = maxLitres;
+        const errorEl = document.getElementById("insufficient-error");
+        errorEl.textContent = `Solde insuffisant pour ${liters} L (${maxLitres} L max disponible)`;
+        errorEl.classList.add("visible");
+      } else {
+        selectedLiters = liters;
+        document.getElementById("insufficient-error").classList.remove("visible");
+      }
+      updateLitersDisplay();
+    }
+
+    function manualLitersInput(val) {
+      if (!activeCard) return;
+      const maxLitres = Math.floor(maxAffordableLiters);
+      let parsed = parseInt(val) || 0;
+
+      if (parsed > maxLitres) {
+        parsed = maxLitres;
+        const inputEl = document.getElementById("liters-val");
+        if (inputEl) inputEl.value = maxLitres;
+        const errorEl = document.getElementById("insufficient-error");
+        errorEl.textContent = `Volume limité à votre solde disponible (${maxLitres} L max)`;
+        errorEl.classList.add("visible");
+      } else {
+        document.getElementById("insufficient-error").classList.remove("visible");
+      }
+
+      selectedLiters = parsed;
+      const totalCost = selectedLiters * pricePerLiter;
+      document.getElementById("live-cost-display").textContent = `${totalCost.toFixed(3)} DT`;
+
+      // Mettre à jour les presets active / disabled
+      document.querySelectorAll(".preset-btn").forEach(btn => {
+        const btnLiters = parseInt(btn.textContent);
+        btn.classList.remove("active");
+        if (btnLiters === selectedLiters) {
+          btn.classList.add("active");
+        }
+        const disabled = btnLiters > maxLitres;
+        btn.disabled = disabled;
+        btn.style.opacity = disabled ? "0.3" : "1";
+        btn.style.cursor = disabled ? "not-allowed" : "pointer";
+      });
+    }
+
+    function validateManualLitersOnBlur(input) {
+      if (!activeCard) return;
+      const maxLitres = Math.floor(maxAffordableLiters);
+      let val = parseInt(input.value) || 10;
+      if (val < 10 && maxLitres >= 10) val = 10;
+      if (val > maxLitres) val = maxLitres;
+      selectedLiters = val;
+      updateLitersDisplay();
+    }
+
+    function updateLitersDisplay() {
+      const maxLitres = Math.floor(maxAffordableLiters);
+      const inputEl = document.getElementById("liters-val");
+      if (inputEl) {
+        if (inputEl.tagName === 'INPUT') {
+          inputEl.value = selectedLiters;
+        } else {
+          inputEl.textContent = selectedLiters;
+        }
+      }
+
+      const totalCost = selectedLiters * pricePerLiter;
+      document.getElementById("live-cost-display").textContent = `${totalCost.toFixed(3)} DT`;
+
+      // Update preset buttons state (disable if > maxLitres)
+      document.querySelectorAll(".preset-btn").forEach(btn => {
+        const btnLiters = parseInt(btn.textContent);
+        btn.classList.remove("active");
+        if (btnLiters === selectedLiters) {
+          btn.classList.add("active");
+        }
+        const disabled = btnLiters > maxLitres;
+        btn.disabled = disabled;
+        btn.style.opacity = disabled ? "0.3" : "1";
+        btn.style.cursor = disabled ? "not-allowed" : "pointer";
+      });
+
+      // Mettre à jour l'état du bouton + pour empêcher de dépasser le solde
+      const btnPlus = document.querySelector(".qty-controls .qty-btn:last-child");
+      if (btnPlus) {
+        const cannotAdd = (selectedLiters + 10 > maxLitres);
+        btnPlus.disabled = cannotAdd;
+        btnPlus.style.opacity = cannotAdd ? "0.3" : "1";
+        btnPlus.style.cursor = cannotAdd ? "not-allowed" : "pointer";
+      }
+    }
+
+    // Cancel refill process
+    function cancelRefill() {
+      activeCard = null;
+      showKioskStep(1);
+    }
+
+    // Confirm water purchase and send transaction to backend
+    function confirmRefill() {
+      if (!activeCard) return;
+
+      const totalCost = selectedLiters * pricePerLiter;
+
+      if (totalCost > activeCard.solde) {
+        const errorEl = document.getElementById("insufficient-error");
+        errorEl.textContent = `Solde insuffisant (Requis: ${totalCost.toFixed(3)} DT)`;
+        errorEl.classList.add("visible");
+        return;
+      }
+
+      // Send to API
+      const requestData = {
+        uid: activeCard.uid,
+        borne_id: 1,
+        volume_demande: selectedLiters,
+        volume_distribue: selectedLiters,
+        statut: "reussie"
+      };
+
+      fetch("index.php?route=api/transactions/store", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(requestData)
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === "success") {
+          // Show success screen
+          document.getElementById("success-liters").textContent = `${selectedLiters} L`;
+          document.getElementById("success-cost").textContent = `${totalCost.toFixed(3)} DT`;
+          document.getElementById("kiosk-success-overlay").classList.add("active");
+
+          // Countdown timer for automatic reset
+          let remaining = 3;
+          const countdownText = document.getElementById("countdown-text");
+          countdownText.textContent = remaining;
+
+          const interval = setInterval(() => {
+            remaining -= 1;
+            countdownText.textContent = remaining;
+            if (remaining <= 0) {
+              clearInterval(interval);
+              document.getElementById("kiosk-success-overlay").classList.remove("active");
+              activeCard = null;
+              showKioskStep(1);
+            }
+          }, 1000);
+        } else {
+          alert("Erreur lors du débit: " + data.message);
+        }
+      })
+      .catch(err => {
+        alert("Erreur réseau lors de l'enregistrement.");
+      });
+    }
+  </script>
+</body>
+</html>
