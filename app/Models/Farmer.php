@@ -13,7 +13,7 @@ class Farmer extends BaseModel {
      * Récupère tous les agriculteurs.
      */
     public function findAll(): array {
-        $stmt = $this->db->query("SELECT * FROM agriculteurs ORDER BY nom ASC, prenom ASC");
+        $stmt = $this->db->query("SELECT * FROM agriculteurs WHERE deleted_at IS NULL ORDER BY nom ASC, prenom ASC");
         return $stmt->fetchAll();
     }
 
@@ -21,7 +21,7 @@ class Farmer extends BaseModel {
      * Recherche un agriculteur par son ID.
      */
     public function find(int $id) {
-        $stmt = $this->db->prepare("SELECT * FROM agriculteurs WHERE id = :id");
+        $stmt = $this->db->prepare("SELECT * FROM agriculteurs WHERE id = :id AND deleted_at IS NULL");
         $stmt->execute(['id' => $id]);
         return $stmt->fetch();
     }
@@ -66,8 +66,25 @@ class Farmer extends BaseModel {
      * Supprime un agriculteur.
      */
     public function delete(int $id): bool {
-        $stmt = $this->db->prepare("DELETE FROM agriculteurs WHERE id = :id");
-        return $stmt->execute(['id' => $id]);
+        try {
+            $this->db->beginTransaction();
+            
+            // Soft-delete associated RFID cards
+            $stmtCard = $this->db->prepare("UPDATE cartes_rfid SET deleted_at = CURRENT_TIMESTAMP WHERE agriculteur_id = :id AND deleted_at IS NULL");
+            $stmtCard->execute(['id' => $id]);
+            
+            // Soft-delete farmer
+            $stmtFarmer = $this->db->prepare("UPDATE agriculteurs SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id AND deleted_at IS NULL");
+            $success = $stmtFarmer->execute(['id' => $id]);
+            
+            $this->db->commit();
+            return $success;
+        } catch (\Exception $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            return false;
+        }
     }
 
     /**
@@ -75,10 +92,10 @@ class Farmer extends BaseModel {
      */
     public function count(string $statut = null): int {
         if ($statut) {
-            $stmt = $this->db->prepare("SELECT COUNT(*) FROM agriculteurs WHERE statut = :statut");
+            $stmt = $this->db->prepare("SELECT COUNT(*) FROM agriculteurs WHERE statut = :statut AND deleted_at IS NULL");
             $stmt->execute(['statut' => $statut]);
         } else {
-            $stmt = $this->db->query("SELECT COUNT(*) FROM agriculteurs");
+            $stmt = $this->db->query("SELECT COUNT(*) FROM agriculteurs WHERE deleted_at IS NULL");
         }
         return (int) $stmt->fetchColumn();
     }

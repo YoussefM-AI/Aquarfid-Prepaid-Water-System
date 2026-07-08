@@ -75,6 +75,22 @@ class Database {
                     AFTER `statut`");
             }
 
+            // Migration : colonnes deleted_at pour le soft-delete (agriculteurs et cartes_rfid)
+            $checkFarmerDel = $this->pdo->query("SHOW COLUMNS FROM `agriculteurs` LIKE 'deleted_at'")->fetch();
+            if (!$checkFarmerDel) {
+                $this->pdo->exec("ALTER TABLE `agriculteurs`
+                    ADD COLUMN `deleted_at` TIMESTAMP NULL DEFAULT NULL
+                    AFTER `statut`");
+            }
+
+            $checkCardDel = $this->pdo->query("SHOW COLUMNS FROM `cartes_rfid` LIKE 'deleted_at'")->fetch();
+            if (!$checkCardDel) {
+                $this->pdo->exec("ALTER TABLE `cartes_rfid`
+                    ADD COLUMN `deleted_at` TIMESTAMP NULL DEFAULT NULL
+                    AFTER `statut`");
+            }
+
+
             // Migration : colonne date_resolution dans alertes (pour suivre quand une alerte a été résolue)
             $checkRes = $this->pdo->query("SHOW COLUMNS FROM `alertes` LIKE 'date_resolution'")->fetch();
             if (!$checkRes) {

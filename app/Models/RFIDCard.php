@@ -18,6 +18,7 @@ class RFIDCard extends BaseModel {
                 COALESCE((SELECT SUM(volume_distribue) FROM transactions WHERE carte_rfid_uid = c.uid), 0) AS total_distribue
                 FROM cartes_rfid c
                 JOIN agriculteurs a ON c.agriculteur_id = a.id
+                WHERE c.deleted_at IS NULL AND a.deleted_at IS NULL
                 ORDER BY c.date_association DESC";
         return $this->db->query($sql)->fetchAll();
     }
@@ -29,7 +30,7 @@ class RFIDCard extends BaseModel {
         $sql = "SELECT c.*, a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.statut AS farmer_statut
                 FROM cartes_rfid c
                 JOIN agriculteurs a ON c.agriculteur_id = a.id
-                WHERE c.uid = :uid";
+                WHERE c.uid = :uid AND c.deleted_at IS NULL AND a.deleted_at IS NULL";
         $stmt = $this->db->prepare($sql);
         $stmt->execute(['uid' => $uid]);
         return $stmt->fetch();
@@ -118,10 +119,10 @@ class RFIDCard extends BaseModel {
      */
     public function count(string $statut = null): int {
         if ($statut) {
-            $stmt = $this->db->prepare("SELECT COUNT(*) FROM cartes_rfid WHERE statut = :statut");
+            $stmt = $this->db->prepare("SELECT COUNT(*) FROM cartes_rfid WHERE statut = :statut AND deleted_at IS NULL");
             $stmt->execute(['statut' => $statut]);
         } else {
-            $stmt = $this->db->query("SELECT COUNT(*) FROM cartes_rfid");
+            $stmt = $this->db->query("SELECT COUNT(*) FROM cartes_rfid WHERE deleted_at IS NULL");
         }
         return (int) $stmt->fetchColumn();
     }
@@ -130,7 +131,7 @@ class RFIDCard extends BaseModel {
      * Calcule le solde total accumulé en circulation.
      */
     public function totalSolde(): float {
-        return (float) $this->db->query("SELECT SUM(solde) FROM cartes_rfid")->fetchColumn();
+        return (float) $this->db->query("SELECT SUM(solde) FROM cartes_rfid WHERE deleted_at IS NULL")->fetchColumn();
     }
 
     /**
@@ -142,7 +143,7 @@ class RFIDCard extends BaseModel {
             return true;
         }
 
-        $sql = "SELECT uid, code_pin FROM cartes_rfid WHERE code_pin IS NOT NULL AND code_pin != ''";
+        $sql = "SELECT uid, code_pin FROM cartes_rfid WHERE code_pin IS NOT NULL AND code_pin != '' AND deleted_at IS NULL";
         $params = [];
         if (!empty($excludeUid)) {
             $sql .= " AND uid != :excludeUid";

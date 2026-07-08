@@ -158,7 +158,7 @@ class ApiController extends BaseController {
                     a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.statut AS farmer_statut
              FROM cartes_rfid c
              JOIN agriculteurs a ON c.agriculteur_id = a.id
-             WHERE c.uid = :uid"
+             WHERE c.uid = :uid AND c.deleted_at IS NULL AND a.deleted_at IS NULL"
         );
         $stmt->execute(['uid' => $uid]);
         $card = $stmt->fetch(\PDO::FETCH_ASSOC);
