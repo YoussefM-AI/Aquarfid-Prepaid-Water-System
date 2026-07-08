@@ -1,4 +1,4 @@
-<!-- Liste des agriculteurs -->
+<!-- Liste des agriculteurs  -->
 
 <div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
     <div>
