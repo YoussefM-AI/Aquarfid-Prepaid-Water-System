@@ -115,6 +115,7 @@
       letter-spacing: 0.5px;
       background: linear-gradient(135deg, #FFF, var(--accent-cyan));
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -352,6 +353,7 @@
     }
     .qty-input[type=number] {
       -moz-appearance: textfield;
+      appearance: textfield;
     }
 
     .qty-value-display span {
@@ -882,7 +884,7 @@
       </div>
       <div style="display: flex; flex-direction: column; justify-content: center;">
         <span style="font-size: 1.3rem; font-weight: 800; color: var(--kiosk-text); display: block; line-height: 1.2;">H2O RFID</span>
-        <span style="font-size: 10px; display: block; font-weight: 600; tracking-wider; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent-blue); line-height: 1;">Kiosque</span>
+        <span style="font-size: 10px; display: block; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent-blue); line-height: 1;">Kiosque</span>
       </div>
     </header>
 
@@ -1078,6 +1080,7 @@
     let pricePerLiter = 0.200;
     let maxAffordableLiters = 0;
     let successResetTimer = null;
+    let isScanningInProgress = false; // Guard against double card scan
 
     // ===== THEME DYNAMIQUE PAR CLIENT (Sans bleu, basé sur la palette du Dashboard) =====
     const THEMES = [
@@ -1124,6 +1127,11 @@
         if (step == 1) {
           loadSimulatorCards();
           resetTheme();
+          // Reset pump state tracker so ON->OFF transition doesn't fire spuriously
+          lastPumpState = 'OFF';
+          isScanningInProgress = false;
+          // Hide any lingering error toast
+          document.getElementById("scan-error-toast").style.display = "none";
         }
       }
     }
@@ -1164,6 +1172,10 @@
 
     // Simulate Card Scan RFID using backend API
     function simulateCardScan(uid) {
+      // Prevent double-scan while a verification is already running
+      if (isScanningInProgress) return;
+      isScanningInProgress = true;
+
       // Hide previous errors
       document.getElementById("scan-error-toast").style.display = "none";
 
@@ -1212,6 +1224,7 @@
               const errorToast = document.getElementById("scan-error-toast");
               errorToast.textContent = data.message || "Erreur lors de la lecture de la carte.";
               errorToast.style.display = "block";
+              isScanningInProgress = false; // Allow retry after error
             }
           }, 750);
         })
@@ -1221,6 +1234,7 @@
             const errorToast = document.getElementById("scan-error-toast");
             errorToast.textContent = "Serveur injoignable.";
             errorToast.style.display = "block";
+            isScanningInProgress = false; // Allow retry after network error
           }, 750);
         });
     }
@@ -1523,6 +1537,12 @@
     let lastProcessedRfidMsgId = null;
     let lastPumpState = 'OFF';
 
+    // Returns true only when the kiosk is on the idle scan screen
+    function isOnIdleScreen() {
+      return document.getElementById('kiosk-step-1').classList.contains('active') &&
+             !document.getElementById('kiosk-success-overlay').classList.contains('active');
+    }
+
     function startKioskPolling() {
       setInterval(() => {
         fetch('index.php?route=api/bornes/kiosk-status&borne_id=1')
@@ -1531,14 +1551,16 @@
             if (data.status !== 'success') return;
 
             // 1. Détection automatique du scan de carte physique (MQTT)
+            //    Only process a new RFID scan when idle on the scan screen
             if (data.last_rfid) {
               const rfid = data.last_rfid;
               
               if (lastProcessedRfidMsgId === null) {
                 // Initialisation au premier chargement pour ne pas réagir sur un vieux scan
                 lastProcessedRfidMsgId = rfid.msg_id;
-              } else if (rfid.msg_id > lastProcessedRfidMsgId) {
+              } else if (rfid.msg_id > lastProcessedRfidMsgId && isOnIdleScreen() && !isScanningInProgress) {
                 lastProcessedRfidMsgId = rfid.msg_id;
+                isScanningInProgress = true;
                 
                 // Déclencher l'effet visuel de scan sur le kiosque
                 const flashEl = document.getElementById("scan-flash-overlay");
@@ -1560,6 +1582,7 @@
 
                 // Naviguer selon la présence d'un PIN
                 setTimeout(() => {
+                  isScanningInProgress = false;
                   if (rfid.has_pin) {
                     document.getElementById("pin-user-name").textContent =
                       `${rfid.farmer_prenom} ${rfid.farmer_nom}`;
@@ -1573,7 +1596,7 @@
               }
             }
 
-            // 2. Synchronisation de la distribution d'eau réelle
+            // 2. Synchronisation de la distribution d'eau réelle (physical pump via MQTT)
             const currentPumpState = data.pump_state;
             
             if (currentPumpState === 'ON') {
@@ -1601,6 +1624,13 @@
             } 
             else if (currentPumpState === 'OFF' && lastPumpState === 'ON') {
               // Transition ON -> OFF : La pompe vient de s'arrêter
+              // Only trigger if the overlay is actually showing (avoids phantom reset on page load)
+              const overlay = document.getElementById("kiosk-success-overlay");
+              if (!overlay.classList.contains('active')) {
+                lastPumpState = currentPumpState;
+                return;
+              }
+
               const successTitle = document.querySelector(".success-title");
               if (successTitle) successTitle.textContent = "Distribution Terminée !";
               
@@ -1620,9 +1650,9 @@
                 if (countdownText) countdownText.textContent = remaining;
                 if (remaining <= 0) {
                   clearInterval(interval);
-                  document.getElementById("kiosk-success-overlay").classList.remove("active");
+                  overlay.classList.remove("active");
                   activeCard = null;
-                  showKioskStep(1);
+                  showKioskStep(1); // This resets lastPumpState to 'OFF' automatically
                 }
               }, 1000);
             }
