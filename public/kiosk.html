@@ -1090,8 +1090,6 @@
       { blue: '#B5630C', blueHover: '#904F09', cyan: '#B5630C' }  // Ambre
     ];
 
-    const DEFAULT_THEME = THEMES[0]; // Sarcelle par défaut
-
     // Applique un thème de couleur unique et cohérent pour ce client (basé sur son UID)
     function applyClientTheme(uid) {
       let hash = 0;
@@ -1108,11 +1106,12 @@
     }
 
     // Revient au thème par défaut (écran d'accueil, avant tout scan)
+    // Removing the inline style overrides lets the :root CSS values (#1A65C0 blue) take over.
     function resetTheme() {
       const root = document.documentElement.style;
-      root.setProperty('--accent-blue', DEFAULT_THEME.blue);
-      root.setProperty('--accent-blue-hover', DEFAULT_THEME.blueHover);
-      root.setProperty('--accent-cyan', DEFAULT_THEME.cyan);
+      root.removeProperty('--accent-blue');
+      root.removeProperty('--accent-blue-hover');
+      root.removeProperty('--accent-cyan');
     }
 
     // Helper to toggle step views
@@ -1125,13 +1124,14 @@
       } else {
         document.getElementById(`kiosk-step-${step}`).classList.add("active");
         if (step == 1) {
-          loadSimulatorCards();
           resetTheme();
           // Reset pump state tracker so ON->OFF transition doesn't fire spuriously
           lastPumpState = 'OFF';
           isScanningInProgress = false;
           // Hide any lingering error toast
           document.getElementById("scan-error-toast").style.display = "none";
+          // Only refresh balances — don't reload all buttons (avoids network delay)
+          updateSimulatorCardBalances();
         }
       }
     }
@@ -1153,9 +1153,9 @@
                 const prenom = c.farmer_prenom || 'Client';
                 const nomInitial = c.farmer_nom ? c.farmer_nom.charAt(0) + '.' : '';
                 return `
-                  <button class="sim-card-btn" onclick="simulateCardScan('${c.uid}')">
+                  <button class="sim-card-btn" data-uid="${c.uid}" data-solde="${c.solde}" onclick="simulateCardScan('${c.uid}')">
                     <span>${prenom} ${nomInitial}</span>
-                    <small style="color: ${isBlocked ? 'var(--error-red)' : 'var(--kiosk-text-muted)'}">${badgeTxt} (${parseFloat(c.solde).toFixed(1)} DT)</small>
+                    <small style="color: ${isBlocked ? 'var(--error-red)' : 'var(--kiosk-text-muted)'}" class="sim-solde-${c.uid}">${badgeTxt} (${parseFloat(c.solde).toFixed(1)} DT)</small>
                   </button>
                 `;
               }).join('');
@@ -1163,6 +1163,31 @@
           }
         })
         .catch(err => console.error("Erreur chargement cartes simulateur:", err));
+    }
+
+    /**
+     * Lightweight balance refresh — updates only the solde text on existing simulator
+     * buttons without re-rendering the whole list (avoids delay on return to step 1).
+     */
+    function updateSimulatorCardBalances() {
+      fetch('index.php?route=api/cards/list')
+        .then(r => r.json())
+        .then(data => {
+          if (data.status === 'success' && data.cards) {
+            data.cards.forEach(c => {
+              const el = document.querySelector(`.sim-solde-${c.uid}`);
+              if (el) {
+                const isBlocked = (c.statut !== 'active' || c.farmer_statut !== 'actif');
+                el.textContent = (isBlocked ? 'Bloqué' : 'Actif') + ` (${parseFloat(c.solde).toFixed(1)} DT)`;
+                el.style.color = isBlocked ? 'var(--error-red)' : 'var(--kiosk-text-muted)';
+                // Disable the button if the card is blocked or has zero balance
+                const btn = el.closest('button');
+                if (btn) btn.disabled = isBlocked;
+              }
+            });
+          }
+        })
+        .catch(() => {});
     }
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -1187,6 +1212,7 @@
       fetch(`index.php?route=api/cards/verify&uid=${uid}&borne_id=1`)
         .then(response => response.json())
         .then(data => {
+          // Short delay just for the flash animation to be visible
           setTimeout(() => {
             flashEl.classList.remove("flash-active");
             if (data.status === "success") {
@@ -1201,6 +1227,7 @@
                 errorToast.textContent = `💳 Solde insuffisant — ${parseFloat(activeCard.solde).toFixed(3)} DT disponibles. Veuillez recharger votre carte.`;
                 errorToast.style.display = "block";
                 activeCard = null;
+                isScanningInProgress = false; // Allow retry after insufficient balance
                 return;
               }
 
@@ -1226,7 +1253,7 @@
               errorToast.style.display = "block";
               isScanningInProgress = false; // Allow retry after error
             }
-          }, 750);
+          }, 350); // Reduced from 750ms → snappier response
         })
         .catch(err => {
           setTimeout(() => {
@@ -1235,7 +1262,7 @@
             errorToast.textContent = "Serveur injoignable.";
             errorToast.style.display = "block";
             isScanningInProgress = false; // Allow retry after network error
-          }, 750);
+          }, 350);
         });
     }
 
@@ -1566,7 +1593,7 @@
                 const flashEl = document.getElementById("scan-flash-overlay");
                 if (flashEl) {
                   flashEl.classList.add("flash-active");
-                  setTimeout(() => flashEl.classList.remove("flash-active"), 750);
+                  setTimeout(() => flashEl.classList.remove("flash-active"), 400);
                 }
 
                 // Charger les données de la carte scannée
@@ -1580,7 +1607,7 @@
                 maxAffordableLiters = rfid.max_volume_litres;
                 applyClientTheme(rfid.uid);
 
-                // Naviguer selon la présence d'un PIN
+                // Navigate immediately after the flash (400ms)
                 setTimeout(() => {
                   isScanningInProgress = false;
                   if (rfid.has_pin) {
@@ -1592,7 +1619,7 @@
                     setupWaterSelectionForSolde();
                     showKioskStep(2);
                   }
-                }, 800);
+                }, 420); // slightly after flash removes
               }
             }
 
