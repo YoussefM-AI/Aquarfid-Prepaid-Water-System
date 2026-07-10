@@ -21,11 +21,11 @@
 // ============================================================
 
 // --- WiFi ---
-const char *WIFI_SSID = "VOTRE_WIFI_SSID";
-const char *WIFI_PASSWORD = "VOTRE_WIFI_PASSWORD";
+const char *WIFI_SSID = "TP-Link_71FA";
+const char *WIFI_PASSWORD = "46116147";
 
 // --- Serveur API ---
-const char *SERVER_BASE = "http://192.168.1.100/water/public/index.php";
+const char *SERVER_BASE = "http://192.168.1.156/water/public/index.php";
 
 const int BORNE_ID = 1;          // ID de cette borne dans la DB
 const int WIFI_TIMEOUT = 15000;  // Timeout connexion WiFi (ms)
@@ -33,10 +33,10 @@ const int HTTP_TIMEOUT = 8000;   // Timeout requête HTTP (ms)
 const int PING_INTERVAL = 30000; // Intervalle keep-alive (30s)
 
 // --- Broker MQTT ---
-const char *MQTT_BROKER = "192.168.1.100";
+const char *MQTT_BROKER = "192.168.1.156";
 const int MQTT_PORT = 1883;
-const char *MQTT_USER = "";
-const char *MQTT_PASS = "";
+const char *MQTT_USER = "water_user";
+const char *MQTT_PASS = "water_pass123";
 const int MQTT_PUB_INTERVAL = 3000; // Intervalle publication état (ms)
 
 // --- Paramètres de distribution ---
@@ -71,6 +71,46 @@ const int VOLUME_MAX_LITRES = 2000;   // Volume max par transaction (L)
 #define PIN_LED_ORANGE 27
 #define PIN_LED_RED 33
 
+// --- Déclarations Types et Prototypes (C++ Forward Declarations) ---
+enum Color { GREEN, ORANGE, RED, OFF };
+void setLed(Color c);
+void ledsOff();
+void beep(int count, int durationMs);
+void resetSession();
+void publishHeartbeat();
+void publishStatus();
+void publishAlert(const String &type, const String &description);
+void connectMQTT();
+void mqttCallback(char *topic, byte *payload, unsigned int length);
+void handleIdle();
+void handlePinWait();
+void handleVolumeSelect();
+void handleDistributing();
+void handleDone();
+void handleError();
+void checkSafety();
+void valveOpen();
+void valveClose();
+void verifyCard(const String &uid);
+void verifyPin();
+void startDistribution();
+void finalizeTransaction(const String &statut);
+void sendAlert(const String &type, const String &description);
+void pingServer();
+void emergencyStop(const String &reason);
+float pulsesToLitres(unsigned long pulses);
+void displayIdle();
+void displayWelcome();
+void displayVolumePrompt();
+void displayPinProgress(int digits);
+void displayDistribution();
+void displayDistributionProgress(float done, float total);
+void displaySuccess();
+void displayMessage(const String &title, const String &msg);
+bool httpGet(const String &url, JsonDocument &response);
+bool httpPost(const String &url, const String &jsonBody, JsonDocument &response);
+void connectWiFi();
+
 // Clavier 4x4 (pour saisie PIN)
 const byte ROWS = 4;
 const byte COLS = 4;
@@ -97,8 +137,9 @@ PubSubClient mqttClient(espWifiClient);
 // ============================================================
 
 volatile unsigned long pulseCount = 0;
-unsigned long lastPulseCount = 0;
+unsigned long lastPulseCountFlow = 0;
 unsigned long lastFlowCheck = 0;
+float currentFlowRate = 0.0;
 
 // ============================================================
 // MACHINE À ÉTATS
@@ -134,6 +175,7 @@ struct Session {
   float debitedAmount;
   unsigned long startTime;
   unsigned long lastFlowTime;
+  unsigned long startPulseCount;
 };
 
 Session session;
@@ -212,6 +254,7 @@ void loop() {
 
   if (now - lastPingTime > PING_INTERVAL) {
     pingServer();
+    publishHeartbeat();
     lastPingTime = now;
   }
 
@@ -270,9 +313,8 @@ void loop() {
   }
 
   if (now - lastStatusDisplay > 5000 && currentState == STATE_DISTRIBUTING) {
-    float litres = pulsesToLitres(pulseCount - lastPulseCount);
-    Serial.printf("[DIST] Volume distribué : %.2f / %.2f L\n",
-                  session.distributedLitres + litres, session.requestedLitres);
+    Serial.printf("[DIST] Volume distribué : %.2f / %.2f L (Débit: %.1f L/min)\n",
+                  session.distributedLitres, session.requestedLitres, currentFlowRate);
     lastStatusDisplay = now;
   }
 }
@@ -297,6 +339,13 @@ void handleIdle() {
 
   Serial.println(F("\n--- CARTE SCANNÉE ---"));
   Serial.println("[RFID] UID: " + uid);
+
+  // Publication MQTT de l'UID
+  if (mqttClient.connected()) {
+    String topicRfid = "water/station" + String(BORNE_ID) + "/rfid";
+    mqttClient.publish(topicRfid.c_str(), uid.c_str(), false);
+  }
+
   beep(1, 200);
   setLed(ORANGE);
 
@@ -490,7 +539,8 @@ void handleVolumeSelect() {
 
 void startDistribution() {
   noInterrupts();
-  lastPulseCount = pulseCount;
+  session.startPulseCount = pulseCount;
+  lastPulseCountFlow = pulseCount;
   interrupts();
 
   session.distributedLitres = 0;
@@ -514,7 +564,7 @@ void handleDistributing() {
   currentPulses = pulseCount;
   interrupts();
 
-  unsigned long delta = currentPulses - lastPulseCount;
+  unsigned long delta = currentPulses - session.startPulseCount;
   float distributed = pulsesToLitres(delta);
   session.distributedLitres = distributed;
 
@@ -582,6 +632,8 @@ void checkSafety() {
       beep(3, 200);
     }
     leakWasHigh = leakNow;
+    
+    currentFlowRate = 0.0; // Pas de débit hors distribution
     return;
   }
 
@@ -616,12 +668,12 @@ void checkSafety() {
     currentPulses = pulseCount;
     interrupts();
 
-    unsigned long pulsesInSec = currentPulses - lastPulseCount;
-    float debitLMin = pulsesToLitres(pulsesInSec) * 60.0;
-    lastPulseCount = currentPulses;
+    unsigned long pulsesInSec = currentPulses - lastPulseCountFlow;
+    currentFlowRate = pulsesToLitres(pulsesInSec) * 60.0;
+    lastPulseCountFlow = currentPulses;
     lastFlowCheck = now;
 
-    if (debitLMin > DEBIT_MAX_L_MIN && !alertSent) {
+    if (currentFlowRate > DEBIT_MAX_L_MIN && !alertSent) {
       alertSent = true;
       sendAlert("fuite", "Débit anormal détecté (rupture conduite possible).");
     }
@@ -688,7 +740,6 @@ float pulsesToLitres(unsigned long pulses) {
   return (float)pulses / PULSES_PER_LITRE;
 }
 
-enum Color { GREEN, ORANGE, RED, OFF };
 void setLed(Color c) {
   digitalWrite(PIN_LED_GREEN, c == GREEN ? HIGH : LOW);
   digitalWrite(PIN_LED_ORANGE, c == ORANGE ? HIGH : LOW);
@@ -712,6 +763,10 @@ void resetSession() {
   session = Session();
   pinBuffer = "";
   alertSent = false;
+  
+  // Re-initialiser le lecteur RFID pour le reveiller si baisse de tension (ex: buzzer, relais)
+  rfid.PCD_Init();
+
   currentState = STATE_IDLE;
   setLed(GREEN);
   displayIdle();
@@ -781,6 +836,8 @@ void connectWiFi() {
 }
 
 // ---------------- MQTT ----------------
+void publishHeartbeat();
+
 void connectMQTT() {
   if (mqttClient.connected())
     return;
@@ -790,12 +847,32 @@ void connectMQTT() {
   mqttClient.setCallback(mqttCallback);
   mqttClient.setKeepAlive(60);
 
-  bool ok = (strlen(MQTT_USER) > 0)
-                ? mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASS)
-                : mqttClient.connect(clientId.c_str());
+  // Configuration Last Will and Testament (LWT) sur le topic status
+  String topicStatus = "water/station" + String(BORNE_ID) + "/status";
+  bool ok = mqttClient.connect(
+      clientId.c_str(), 
+      MQTT_USER, 
+      MQTT_PASS, 
+      topicStatus.c_str(), 
+      1,     // QoS 1
+      true,  // Retained
+      "offline"
+  );
+  
   if (ok) {
-    String topicCmd = "eau/bornes/" + String(BORNE_ID) + "/commande";
-    mqttClient.subscribe(topicCmd.c_str(), 1);
+    Serial.println(F("[MQTT] Connecté au broker Mosquitto ✓"));
+    // Publier l'état online en retained
+    mqttClient.publish(topicStatus.c_str(), "online", true);
+    
+    // S'abonner au topic des commandes
+    String topicCmd = "water/station" + String(BORNE_ID) + "/command";
+    mqttClient.subscribe(topicCmd.c_str(), 1); // QoS 1
+    
+    // Publier le premier heartbeat immédiatement
+    publishHeartbeat();
+  } else {
+    Serial.print(F("[MQTT] Échec connexion, rc="));
+    Serial.println(mqttClient.state());
   }
 }
 
@@ -803,54 +880,117 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   String msg;
   for (unsigned int i = 0; i < length; i++)
     msg += (char)payload[i];
-  JsonDocument doc;
-  if (deserializeJson(doc, msg) != DeserializationError::Ok)
-    return;
+    
+  Serial.print(F("[MQTT] Message reçu sur "));
+  Serial.print(topic);
+  Serial.print(F(" : "));
+  Serial.println(msg);
 
-  String typeCmd = doc["type"] | "";
-  if (typeCmd == "stop_pompe") {
+  JsonDocument doc;
+  if (deserializeJson(doc, msg) != DeserializationError::Ok) {
+    Serial.println(F("[MQTT] Échec parsing JSON de la commande."));
+    return;
+  }
+
+  String typeCmd = doc["type"] | doc["command_type"] | "";
+  
+  if (typeCmd == "stop_pompe" || typeCmd == "stop_pump") {
     mqttAdminOverride = false;
-    emergencyStop("Arrêt manuel");
-  } else if (typeCmd == "start_pompe") {
-    if (currentState != STATE_IDLE && currentState != STATE_ALERT)
+    emergencyStop("Arrêt manuel à distance");
+  } 
+  else if (typeCmd == "start_pompe" || typeCmd == "start_pump") {
+    if (currentState != STATE_IDLE && currentState != STATE_ALERT) {
+      Serial.println(F("[MQTT] Ignoré : pompe déjà active ou en alerte."));
       return;
+    }
+    Serial.println(F("[MQTT] Démarrage manuel de la pompe à distance..."));
     mqttAdminOverride = true;
     valveOpen();
     setLed(ORANGE);
     beep(2, 150);
+  } 
+  else if (typeCmd == "set_volume") {
+    float vol = doc["payload"]["volume"] | doc["volume"] | 0.0;
+    if (vol > 0.0) {
+      Serial.printf("[MQTT] Commande volume reçue : %.2f L\n", vol);
+      if (currentState == STATE_IDLE || currentState == STATE_VOLUME_SELECT) {
+        session.requestedLitres = vol;
+        startDistribution();
+      }
+    }
+  } 
+  else if (typeCmd == "allow_rfid" || typeCmd == "block_rfid") {
+    String cardUid = doc["payload"]["uid"] | doc["uid"] | "";
+    bool allowed = (typeCmd == "allow_rfid");
+    Serial.printf("[MQTT] Commande carte RFID %s : %s\n", cardUid.c_str(), allowed ? "AUTORISÉE" : "BLOQUÉE");
+    displayMessage(allowed ? "RFID AUTORISÉE" : "RFID BLOQUÉE", cardUid);
+    beep(1, 300);
+  }
+  else if (typeCmd == "restart_esp" || typeCmd == "reboot") {
+    Serial.println(F("[MQTT] Commande de redémarrage ESP32 reçue. Reboot imminent..."));
+    beep(4, 100);
+    delay(500);
+    ESP.restart();
+  } 
+  else if (typeCmd == "update_config") {
+    // Exemple : modifier le coefficient de calibration du débitmètre
+    float pulses = doc["payload"]["pulses_per_litre"] | doc["pulses_per_litre"] | 0.0;
+    if (pulses > 0.0) {
+      // Configuration mise à jour
+      Serial.printf("[MQTT] Calibration mise à jour : %.2f pulses/L\n", pulses);
+      displayMessage("CONFIG MAJ", "Calibration ok");
+      beep(2, 100);
+    }
   }
 }
 
 void publishStatus() {
   if (!mqttClient.connected())
     return;
-  String topicEtat = "eau/bornes/" + String(BORNE_ID) + "/etat";
+  String stationPrefix = "water/station" + String(BORNE_ID);
+
+  // 1. État de la pompe/relais (ON/OFF)
+  String topicPump = stationPrefix + "/pump";
+  String pumpState = (digitalRead(PIN_VALVE) == LOW) ? "ON" : "OFF";
+  mqttClient.publish(topicPump.c_str(), pumpState.c_str(), false);
+
+  // 2. Débit instantané en L/min
+  String topicFlow = stationPrefix + "/flow";
+  String debitStr = String(currentFlowRate, 2);
+  mqttClient.publish(topicFlow.c_str(), debitStr.c_str(), false);
+
+  // 3. Volume d'eau distribué cumulé
+  String topicVol = stationPrefix + "/volume";
+  String volStr = String(session.distributedLitres, 2);
+  mqttClient.publish(topicVol.c_str(), volStr.c_str(), false);
+}
+
+void publishHeartbeat() {
+  if (!mqttClient.connected())
+    return;
+  String topicHb = "water/station" + String(BORNE_ID) + "/heartbeat";
 
   JsonDocument doc;
-  doc["borne_id"] = BORNE_ID;
-  doc["etat_vanne"] = (digitalRead(PIN_VALVE) == LOW) ? "ouverte" : "fermee";
-  doc["fuite"] = (digitalRead(PIN_LEAK_SENSOR) == HIGH);
-  doc["trop_plein"] = (digitalRead(PIN_OVERFLOW) == HIGH);
   doc["rssi"] = WiFi.RSSI();
-  doc["etat_machine"] = (int)currentState;
-  doc["admin_override"] = mqttAdminOverride;
-  doc["ts"] = millis();
+  doc["uptime"] = millis();
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["valve_status"] = (digitalRead(PIN_VALVE) == LOW) ? "open" : "closed";
 
   String jsonStr;
   serializeJson(doc, jsonStr);
-  mqttClient.publish(topicEtat.c_str(), jsonStr.c_str(), false);
+  mqttClient.publish(topicHb.c_str(), jsonStr.c_str(), false);
 }
 
 void publishAlert(const String &type, const String &description) {
   if (!mqttClient.connected())
     return;
-  String topicAlerte = "eau/bornes/" + String(BORNE_ID) + "/alerte";
+  String topicAlerte = "water/station" + String(BORNE_ID) + "/log";
 
   JsonDocument doc;
-  doc["borne_id"] = BORNE_ID;
+  doc["level"] = "error";
   doc["type"] = type;
   doc["description"] = description;
-  doc["ts"] = millis();
+  doc["uptime"] = millis();
 
   String jsonStr;
   serializeJson(doc, jsonStr);

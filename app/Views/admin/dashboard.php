@@ -107,6 +107,22 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
             </div>
         </div>
 
+        <!-- Section Bornes de Distribution (IoT) -->
+        <div class="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden p-6 mb-6">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="wifi" class="w-5 h-5 text-blue-500"></i> Supervision des Bornes IoT
+                </h2>
+                <span class="text-xs text-slate-500 font-medium">Mise à jour en temps réel</span>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="bornes-grid-container">
+                <div class="col-span-full text-center py-6 text-slate-500 text-xs">
+                    Chargement des bornes en cours...
+                </div>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
             
             <?php if ($viewTransactions): ?>
@@ -203,6 +219,45 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                             </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section Logs MQTT & Historique Pompe -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Journal MQTT -->
+            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-100 bg-slate-50">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="terminal" class="w-4 h-4 text-slate-600"></i> Trafic MQTT en temps réel
+                    </h2>
+                </div>
+                <div class="p-4 overflow-y-auto max-h-[350px] font-mono text-xs space-y-2 bg-slate-950 text-slate-300" id="mqtt-logs-container">
+                    <div class="text-center text-slate-500 py-6">Aucun message MQTT.</div>
+                </div>
+            </div>
+
+            <!-- Historique Relais Pompe -->
+            <div class="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-100 bg-slate-50">
+                    <h2 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="history" class="w-4 h-4 text-emerald-500"></i> Historique Relais & Pompe
+                    </h2>
+                </div>
+                <div class="p-1 overflow-x-auto flex-1 max-h-[350px]">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                                <th class="px-4 py-3">Station</th>
+                                <th class="px-4 py-3">Action</th>
+                                <th class="px-4 py-3">Origine</th>
+                                <th class="px-4 py-3 text-right">Date/Heure</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-xs divide-y divide-slate-50" id="pump-logs-container">
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Aucun log de pompe.</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -763,4 +818,209 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
         lucide.createIcons();
     }
     function closeAdminModal() { document.getElementById('admin-modal').classList.add('hidden'); }
+
+    // =========================================================================
+    // MQTT & REAL-TIME SUPERVISION
+    // =========================================================================
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    function sendBorneCommand(stationId, commandType, additionalPayload = {}) {
+        if (!confirm(`Envoyer la commande '${commandType}' à la borne #${stationId} ?`)) {
+            return;
+        }
+        
+        const params = {
+            borne_id: stationId,
+            type_commande: commandType
+        };
+        
+        if (additionalPayload.volume) {
+            params.volume = additionalPayload.volume;
+        }
+
+        fetch('index.php?route=api/bornes/commande', {
+            method: 'POST',
+            body: JSON.stringify(params),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(`Commande '${commandType}' enregistrée ! (ID: ${data.commande_id})`);
+                pollStatusLive();
+            } else {
+                alert(`Erreur : ${data.message}`);
+            }
+        })
+        .catch(err => {
+            console.error("Command Error:", err);
+            alert("Erreur de communication avec le serveur.");
+        });
+    }
+
+    function promptVolumeCommand(stationId) {
+        const vol = prompt("Entrez la quantité d'eau à distribuer (en litres) :");
+        if (vol === null) return;
+        const parsed = parseFloat(vol);
+        if (isNaN(parsed) || parsed <= 0) {
+            alert("Volume invalide.");
+            return;
+        }
+        sendBorneCommand(stationId, 'set_volume', { volume: parsed });
+    }
+
+    function updateBornesGrid(bornes) {
+        const container = document.getElementById('bornes-grid-container');
+        if (!container) return;
+        
+        if (!bornes || bornes.length === 0) {
+            container.innerHTML = `<div class="col-span-full text-center py-6 text-slate-400 text-xs">Aucune borne configurée.</div>`;
+            return;
+        }
+
+        let html = '';
+        bornes.forEach(b => {
+            const isOnline = b.mqtt_connecte || b.statut_connexion === 'en ligne';
+            const valveOpen = b.etat_vanne === 'ouverte';
+            
+            const badgeOnline = isOnline 
+                ? `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>En ligne</span>` 
+                : `<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">Hors ligne</span>`;
+                
+            const badgeValve = valveOpen
+                ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700 uppercase">Ouverte (ON)</span>`
+                : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase">Fermée (OFF)</span>`;
+
+            const controlBtn = valveOpen
+                ? `<button onclick="sendBorneCommand(${b.id}, 'stop_pompe')" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Arrêter</button>`
+                : `<button onclick="sendBorneCommand(${b.id}, 'start_pompe')" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Démarrer</button>`;
+
+            html += `
+            <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5 hover:shadow-md transition-all flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <h3 class="text-sm font-bold text-slate-800">${escapeHtml(b.nom)}</h3>
+                        ${badgeOnline}
+                    </div>
+                    <p class="text-xs text-slate-500 mb-3 flex items-center gap-1">
+                        <i data-lucide="map-pin" class="w-3.5 h-3.5"></i> ${escapeHtml(b.localisation)}
+                    </p>
+                    
+                    <div class="bg-white border border-slate-150 rounded-xl p-3 space-y-2 mb-4 text-xs shadow-sm">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-1.5">
+                          <span class="text-slate-500 font-medium">Électrovanne</span>
+                          ${badgeValve}
+                        </div>
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-1.5">
+                          <span class="text-slate-500 font-medium">Débit Instantané</span>
+                          <span class="font-bold text-slate-700">${b.debit_instantane !== null ? b.debit_instantane.toFixed(1) : '0.0'} L/min</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                          <span class="text-slate-500 font-medium">Dernier Signe de Vie</span>
+                          <span class="font-mono text-[9px] text-slate-400">${b.derniere_telemerie_mqtt ? b.derniere_telemerie_mqtt : (b.dernier_ping ? b.dernier_ping : 'Aucun')}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-1.5 border-t border-slate-150/50 pt-3 mt-1">
+                    ${controlBtn}
+                    <button onclick="promptVolumeCommand(${b.id})" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 rounded-lg transition-all" title="Définir volume"><i data-lucide="droplet" class="w-3.5 h-3.5"></i></button>
+                    <button onclick="sendBorneCommand(${b.id}, 'restart_esp')" class="p-1.5 bg-white border border-slate-200 hover:bg-amber-50 text-amber-600 rounded-lg transition-all" title="Redémarrer ESP32"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i></button>
+                </div>
+            </div>
+            `;
+        });
+        container.innerHTML = html;
+    }
+
+    function updateMqttLogs(logs) {
+        const container = document.getElementById('mqtt-logs-container');
+        if (!container) return;
+        
+        if (!logs || logs.length === 0) {
+            container.innerHTML = `<div class="text-center text-slate-500 py-6">Aucun message MQTT.</div>`;
+            return;
+        }
+
+        let html = '';
+        logs.forEach(l => {
+            const dirColor = (l.direction === 'in') ? 'text-emerald-400' : 'text-blue-400';
+            const dirSymbol = (l.direction === 'in') ? '◀ IN' : '▶ OUT';
+            html += `
+            <div class="py-1 border-b border-slate-900 flex justify-between gap-4">
+                <span class="shrink-0 font-mono text-[10px] text-slate-500">${l.created_at}</span>
+                <span class="shrink-0 font-bold ${dirColor} text-[10px]">${dirSymbol}</span>
+                <span class="font-bold text-slate-200 truncate flex-1 text-left" title="${escapeHtml(l.topic)}">${escapeHtml(l.topic)}</span>
+                <span class="text-slate-400 max-w-[200px] truncate font-mono text-[10px]" title="${escapeHtml(l.payload)}">${escapeHtml(l.payload)}</span>
+            </div>
+            `;
+        });
+        container.innerHTML = html;
+    }
+
+    function updatePumpLogs(logs) {
+        const container = document.getElementById('pump-logs-container');
+        if (!container) return;
+        
+        if (!logs || logs.length === 0) {
+            container.innerHTML = `<tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Aucun log de pompe.</td></tr>`;
+            return;
+        }
+
+        let html = '';
+        logs.forEach(l => {
+            const actionBadge = (l.action === 'ON')
+                ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-700">MARCHE</span>`
+                : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600">ARRÊT</span>`;
+            
+            html += `
+            <tr class="hover:bg-slate-50 transition-colors">
+                <td class="px-4 py-2 text-slate-800 font-bold">${escapeHtml(l.borne_nom || 'Borne #' + l.station_id)}</td>
+                <td class="px-4 py-2">${actionBadge}</td>
+                <td class="px-4 py-2 font-semibold text-slate-500 uppercase text-[10px]">${escapeHtml(l.triggered_by)}</td>
+                <td class="px-4 py-2 text-right text-slate-500">${l.created_at}</td>
+            </tr>
+            `;
+        });
+        container.innerHTML = html;
+    }
+
+    function pollStatusLive() {
+        fetch('index.php?route=api/bornes/status-live')
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                updateBornesGrid(data.bornes);
+                updateMqttLogs(data.mqtt_messages);
+                updatePumpLogs(data.pump_logs);
+                
+                // Mettre à jour également les compteurs généraux si besoin
+                if (data.bornes) {
+                    const onlineCount = data.bornes.filter(b => b.mqtt_connecte || b.statut_connexion === 'en ligne').length;
+                    const statsText = document.querySelector('.flex.items-center.gap-3.bg-slate-50 .text-xs .font-bold');
+                    if (statsText) {
+                        statsText.textContent = `${onlineCount} / ${data.bornes.length} Bornes`;
+                    }
+                }
+                
+                // Recréer les icônes Lucide nouvellement injectées
+                if (window.lucide) {
+                    try { lucide.createIcons(); } catch(e){}
+                }
+            }
+        })
+        .catch(err => console.error("Supervision Poll Error:", err));
+    }
+
+    // Lancer le polling périodique toutes les 3 secondes
+    setInterval(pollStatusLive, 3000);
+    // Charger immédiatement au démarrage
+    window.addEventListener('DOMContentLoaded', pollStatusLive);
 </script>

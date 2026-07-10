@@ -27,12 +27,13 @@ class RFIDCard extends BaseModel {
      * Recherche une carte par son UID.
      */
     public function find(string $uid) {
+        $uidClean = str_replace(' ', '', $uid);
         $sql = "SELECT c.*, a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.statut AS farmer_statut
                 FROM cartes_rfid c
                 JOIN agriculteurs a ON c.agriculteur_id = a.id
-                WHERE c.uid = :uid AND c.deleted_at IS NULL AND a.deleted_at IS NULL";
+                WHERE REPLACE(c.uid, ' ', '') = :uid AND c.deleted_at IS NULL AND a.deleted_at IS NULL";
         $stmt = $this->db->prepare($sql);
-        $stmt->execute(['uid' => $uid]);
+        $stmt->execute(['uid' => $uidClean]);
         return $stmt->fetch();
     }
 
@@ -109,7 +110,7 @@ class RFIDCard extends BaseModel {
              WHERE uid = :uid"
         );
         return $stmt->execute([
-            'uid'  => $uid,
+            'uid'  => $card['uid'], // Utiliser l'UID réel de la base avec espaces
             'cost' => $cost
         ]);
     }

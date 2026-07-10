@@ -145,6 +145,264 @@ class Database {
                 KEY `idx_borne_id` (`borne_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Journal des commandes de pompe envoyées aux bornes via MQTT'");
 
+            // Migration MQTT : Tables en anglais demandées
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `stations` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `name` VARCHAR(100) NOT NULL,
+                `location` VARCHAR(255) NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'offline',
+                `api_key` VARCHAR(64) NULL,
+                `last_ping` TIMESTAMP NULL DEFAULT NULL,
+                `valve_status` ENUM('open', 'closed') DEFAULT 'closed',
+                `flow_rate` FLOAT DEFAULT 0.0,
+                `volume_distributed` FLOAT DEFAULT 0.0,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `rfid_cards` (
+                `uid` VARCHAR(50) PRIMARY KEY,
+                `farmer_id` INT NOT NULL,
+                `balance` DECIMAL(10, 3) NOT NULL DEFAULT 0.000,
+                `status` VARCHAR(20) DEFAULT 'active',
+                `pin_code` VARCHAR(255) NULL,
+                `associated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `last_used_at` TIMESTAMP NULL DEFAULT NULL,
+                `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `water_transactions` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `card_uid` VARCHAR(50) NOT NULL,
+                `station_id` INT NOT NULL,
+                `volume_requested` DECIMAL(10, 2) NOT NULL,
+                `volume_distributed` DECIMAL(10, 2) NOT NULL,
+                `amount_debited` DECIMAL(10, 3) NOT NULL,
+                `status` VARCHAR(20) DEFAULT 'success',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `mqtt_messages` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `topic` VARCHAR(255) NOT NULL,
+                `payload` TEXT NOT NULL,
+                `direction` ENUM('in', 'out') NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `commands` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `station_id` INT NOT NULL,
+                `command_type` VARCHAR(50) NOT NULL,
+                `payload` TEXT NULL,
+                `status` ENUM('pending', 'sent', 'ack', 'failed') NOT NULL DEFAULT 'pending',
+                `created_by` INT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `sent_at` TIMESTAMP NULL DEFAULT NULL,
+                `ack_at` TIMESTAMP NULL DEFAULT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `device_status` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `station_id` INT NOT NULL,
+                `connection_status` VARCHAR(20) NOT NULL DEFAULT 'disconnected',
+                `rssi` INT DEFAULT NULL,
+                `valve_status` ENUM('open', 'closed') DEFAULT 'closed',
+                `pump_status` ENUM('ON', 'OFF') DEFAULT 'OFF',
+                `flow_rate` FLOAT DEFAULT 0.0,
+                `volume_distributed` FLOAT DEFAULT 0.0,
+                `uptime` BIGINT DEFAULT 0,
+                `error_message` VARCHAR(255) NULL,
+                `last_heartbeat` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `pump_logs` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `station_id` INT NOT NULL,
+                `action` ENUM('ON', 'OFF') NOT NULL,
+                `volume` FLOAT DEFAULT 0.0,
+                `duration` INT DEFAULT 0,
+                `triggered_by` VARCHAR(50) NOT NULL,
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            $this->pdo->exec("CREATE TABLE IF NOT EXISTS `alerts` (
+                `id` INT AUTO_INCREMENT PRIMARY KEY,
+                `station_id` INT NOT NULL,
+                `alert_type` VARCHAR(50) NOT NULL,
+                `description` TEXT NOT NULL,
+                `resolved` TINYINT(1) DEFAULT 0,
+                `resolved_at` TIMESTAMP NULL DEFAULT NULL,
+                `source` VARCHAR(20) DEFAULT 'mqtt',
+                `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+            // Migration : alignement des collations de cartes_rfid.uid et rfid_cards.uid pour éviter l'erreur 1267 dans les triggers
+            $colInfo = $this->pdo->query("
+                SELECT COLLATION_NAME 
+                FROM INFORMATION_SCHEMA.COLUMNS 
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cartes_rfid' AND COLUMN_NAME = 'uid'
+            ")->fetch();
+
+            if ($colInfo && !empty($colInfo['COLLATION_NAME'])) {
+                $collation = $colInfo['COLLATION_NAME'];
+                $this->pdo->exec("ALTER TABLE `rfid_cards` MODIFY `uid` VARCHAR(50) CHARACTER SET utf8mb4 COLLATE {$collation}");
+                $this->pdo->exec("ALTER TABLE `water_transactions` MODIFY `card_uid` VARCHAR(50) CHARACTER SET utf8mb4 COLLATE {$collation}");
+            }
+
+            // Triggers de synchronisation automatique vers les tables en anglais
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_insert`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_bornes_insert` AFTER INSERT ON `bornes`
+            FOR EACH ROW
+            BEGIN
+                INSERT INTO `stations` (id, name, location, status, last_ping, valve_status, flow_rate)
+                VALUES (NEW.id, NEW.nom, NEW.localisation, NEW.statut_connexion, NEW.dernier_ping, NEW.etat_vanne, NEW.debit_instantane)
+                ON DUPLICATE KEY UPDATE
+                    name = NEW.nom,
+                    location = NEW.localisation,
+                    status = NEW.statut_connexion,
+                    last_ping = NEW.dernier_ping,
+                    valve_status = NEW.etat_vanne,
+                    flow_rate = NEW.debit_instantane;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_update`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_bornes_update` AFTER UPDATE ON `bornes`
+            FOR EACH ROW
+            BEGIN
+                UPDATE `stations` SET
+                    name = NEW.nom,
+                    location = NEW.localisation,
+                    status = NEW.statut_connexion,
+                    last_ping = NEW.dernier_ping,
+                    valve_status = NEW.etat_vanne,
+                    flow_rate = NEW.debit_instantane
+                WHERE id = NEW.id;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_delete`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_bornes_delete` AFTER DELETE ON `bornes`
+            FOR EACH ROW
+            BEGIN
+                DELETE FROM `stations` WHERE id = OLD.id;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_insert`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_insert` AFTER INSERT ON `cartes_rfid`
+            FOR EACH ROW
+            BEGIN
+                INSERT INTO `rfid_cards` (uid, farmer_id, balance, status, pin_code, deleted_at)
+                VALUES (NEW.uid, NEW.agriculteur_id, NEW.solde, NEW.statut, NEW.code_pin, NEW.deleted_at)
+                ON DUPLICATE KEY UPDATE
+                    farmer_id = NEW.agriculteur_id,
+                    balance = NEW.solde,
+                    status = NEW.statut,
+                    pin_code = NEW.code_pin,
+                    deleted_at = NEW.deleted_at;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_update`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_update` AFTER UPDATE ON `cartes_rfid`
+            FOR EACH ROW
+            BEGIN
+                UPDATE `rfid_cards` SET
+                    farmer_id = NEW.agriculteur_id,
+                    balance = NEW.solde,
+                    status = NEW.statut,
+                    pin_code = NEW.code_pin,
+                    deleted_at = NEW.deleted_at,
+                    last_used_at = NEW.derniere_utilisation
+                WHERE uid = NEW.uid;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_delete`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_delete` AFTER DELETE ON `cartes_rfid`
+            FOR EACH ROW
+            BEGIN
+                DELETE FROM `rfid_cards` WHERE uid = OLD.uid;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_transactions_insert`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_transactions_insert` AFTER INSERT ON `transactions`
+            FOR EACH ROW
+            BEGIN
+                INSERT INTO `water_transactions` (id, card_uid, station_id, volume_requested, volume_distributed, amount_debited, status, created_at)
+                VALUES (NEW.id, NEW.carte_rfid_uid, NEW.borne_id, NEW.volume_demande, NEW.volume_distribue, NEW.montant_debite, NEW.statut, NEW.date_heure)
+                ON DUPLICATE KEY UPDATE
+                    card_uid = NEW.carte_rfid_uid,
+                    station_id = NEW.borne_id,
+                    volume_requested = NEW.volume_demande,
+                    volume_distributed = NEW.volume_distribue,
+                    amount_debited = NEW.montant_debite,
+                    status = NEW.statut,
+                    created_at = NEW.date_heure;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_insert`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_alertes_insert` AFTER INSERT ON `alertes`
+            FOR EACH ROW
+            BEGIN
+                INSERT INTO `alerts` (id, station_id, alert_type, description, resolved, resolved_at, source, created_at)
+                VALUES (NEW.id, NEW.borne_id, NEW.type_alerte, NEW.description, NEW.resolu, NEW.date_resolution, NEW.source, NEW.date_heure)
+                ON DUPLICATE KEY UPDATE
+                    station_id = NEW.borne_id,
+                    alert_type = NEW.type_alerte,
+                    description = NEW.description,
+                    resolved = NEW.resolu,
+                    resolved_at = NEW.date_resolution,
+                    source = NEW.source,
+                    created_at = NEW.date_heure;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_update`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_alertes_update` AFTER UPDATE ON `alertes`
+            FOR EACH ROW
+            BEGIN
+                UPDATE `alerts` SET
+                    resolved = NEW.resolu,
+                    resolved_at = NEW.date_resolution,
+                    description = NEW.description
+                WHERE id = NEW.id;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_insert`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_insert` AFTER INSERT ON `commandes_bornes`
+            FOR EACH ROW
+            BEGIN
+                INSERT INTO `commands` (id, station_id, command_type, status, created_by, created_at, sent_at, ack_at)
+                VALUES (NEW.id, NEW.borne_id, NEW.type_commande, NEW.statut, NEW.demande_par, NEW.date_creation, NEW.date_envoi, NEW.date_ack)
+                ON DUPLICATE KEY UPDATE
+                    station_id = NEW.borne_id,
+                    command_type = NEW.type_commande,
+                    status = NEW.statut,
+                    created_by = NEW.demande_par,
+                    created_at = NEW.date_creation,
+                    sent_at = NEW.date_envoi,
+                    ack_at = NEW.date_ack;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_update`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_update` AFTER UPDATE ON `commandes_bornes`
+            FOR EACH ROW
+            BEGIN
+                UPDATE `commands` SET
+                    status = NEW.statut,
+                    sent_at = NEW.date_envoi,
+                    ack_at = NEW.date_ack
+                WHERE id = NEW.id;
+            END;");
+
+            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_delete`;");
+            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_delete` AFTER DELETE ON `commandes_bornes`
+            FOR EACH ROW
+            BEGIN
+                DELETE FROM `commands` WHERE id = OLD.id;
+            END;");
+
+
         } catch (PDOException $e) {
             throw new Exception("Erreur de connexion à la base de données : " . $e->getMessage(), (int)$e->getCode(), $e);
         }

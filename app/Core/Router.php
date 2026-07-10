@@ -57,6 +57,7 @@ class Router {
             // API MQTT — Commandes pompe et supervision temps réel
             'api/bornes/commande'     => ['controller' => 'App\Controllers\ApiController', 'method' => 'commandeBorne'],
             'api/bornes/status-live'  => ['controller' => 'App\Controllers\ApiController', 'method' => 'statusLive'],
+            'api/bornes/kiosk-status' => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskStatus'],
 
             // Gestion des alertes (dashboard admin)
             'alertes/resolve'         => ['controller' => 'App\Controllers\DashboardController', 'method' => 'resolveAlerte'],

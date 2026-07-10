@@ -8,14 +8,10 @@
  *
  * Ce script tourne en boucle infinie (daemon). Il :
  *   - Se connecte au broker Mosquitto
- *   - S'abonne aux topics eau/bornes/+/etat et eau/bornes/+/alerte
- *   - Met à jour MariaDB avec les télémétries reçues des ESP32
- *   - Poll la table commandes_bornes toutes les secondes et publie
- *     les commandes en attente sur MQTT
- *
- * Supervision recommandée (Windows) : NSSM ou pm2
- *   nssm install MqttWorker "php" "c:\laragon\www\water\workers\mqtt_worker.php"
- *   nssm start MqttWorker
+ *   - S'abonne aux nouveaux topics : water/station+/+
+ *   - Met à jour MariaDB avec les télémétries et heartbeats
+ *   - Écrit dans les nouvelles tables : mqtt_messages, device_status, pump_logs
+ *   - Poll la table commandes_bornes et publie les commandes en attente
  * ====================================================================
  */
 
@@ -34,6 +30,9 @@ require_once __DIR__ . '/../app/Models/BaseModel.php';
 require_once __DIR__ . '/../app/Models/Borne.php';
 require_once __DIR__ . '/../app/Models/Alerte.php';
 require_once __DIR__ . '/../app/Models/CommandeBorne.php';
+require_once __DIR__ . '/../app/Models/MqttMessage.php';
+require_once __DIR__ . '/../app/Models/DeviceStatus.php';
+require_once __DIR__ . '/../app/Models/PumpLog.php';
 
 use PhpMqtt\Client\MqttClient;
 use PhpMqtt\Client\ConnectionSettings;
@@ -41,28 +40,28 @@ use PhpMqtt\Client\Exceptions\MqttClientException;
 use App\Models\Borne;
 use App\Models\Alerte;
 use App\Models\CommandeBorne;
+use App\Models\MqttMessage;
+use App\Models\DeviceStatus;
+use App\Models\PumpLog;
 
 // ── Configuration MQTT ────────────────────────────────────────────────────────
-// Adaptez ces valeurs à votre installation Mosquitto locale
-define('MQTT_HOST',      '127.0.0.1');
+define('MQTT_HOST',      '127.0.0.1');  // Broker Mosquitto local (Laragon)
 define('MQTT_PORT',      1883);
 define('MQTT_CLIENT_ID', 'php_water_worker_' . gethostname());
-define('MQTT_USERNAME',  '');           // Laisser vide si pas d'auth Mosquitto
-define('MQTT_PASSWORD',  '');           // Laisser vide si pas d'auth Mosquitto
+define('MQTT_USERNAME',  'water_user');
+define('MQTT_PASSWORD',  'water_pass123');
 define('MQTT_KEEPALIVE', 60);           // Secondes
 
 // ── Topics ────────────────────────────────────────────────────────────────────
-define('TOPIC_ETAT',         'eau/bornes/+/etat');
-define('TOPIC_ALERTE',       'eau/bornes/+/alerte');
-define('TOPIC_COMMANDE_SUB', 'eau/bornes/+/commande');
+define('TOPIC_WILDCARD', 'water/+/+');
 
 // ── Timing ────────────────────────────────────────────────────────────────────
-define('POLL_INTERVAL_MS',  1000);   // Polling commandes (ms)
-define('RECONNECT_DELAY_S', 5);      // Délai avant tentative reconnexion
+define('POLL_INTERVAL_S',   1);      // Polling commandes (secondes)
+define('RECONNECT_DELAY_S', 5);      // Reconnexion (secondes)
 
 // ── Log ───────────────────────────────────────────────────────────────────────
 define('LOG_FILE', __DIR__ . '/mqtt_worker.log');
-define('LOG_MAX_SIZE_MB', 10);       // Rotation si > 10 Mo
+define('LOG_MAX_SIZE_MB', 10);
 
 // =============================================================================
 // Fonctions utilitaires
@@ -71,7 +70,6 @@ define('LOG_MAX_SIZE_MB', 10);       // Rotation si > 10 Mo
 function workerLog(string $level, string $message): void {
     $line = '[' . date('Y-m-d H:i:s') . '] [' . strtoupper($level) . '] ' . $message . PHP_EOL;
     echo $line;
-    // Écriture fichier log avec rotation simple
     if (file_exists(LOG_FILE) && filesize(LOG_FILE) > LOG_MAX_SIZE_MB * 1024 * 1024) {
         rename(LOG_FILE, LOG_FILE . '.' . date('Ymd_His') . '.old');
     }
@@ -79,11 +77,11 @@ function workerLog(string $level, string $message): void {
 }
 
 /**
- * Extrait le borne_id depuis un topic MQTT.
- * Exemple : "eau/bornes/3/etat" → 3
+ * Extrait le borne_id (station_id) depuis un topic.
+ * Exemple : "water/station1/status" -> 1
  */
-function extractBorneId(string $topic): ?int {
-    if (preg_match('#eau/bornes/(\d+)/#', $topic, $m)) {
+function extractStationId(string $topic): ?int {
+    if (preg_match('#water/station(\d+)/#', $topic, $m)) {
         return (int)$m[1];
     }
     return null;
@@ -93,99 +91,164 @@ function extractBorneId(string $topic): ?int {
 // Gestionnaire de messages MQTT reçus
 // =============================================================================
 
-function handleMessage(string $topic, string $payload, Borne $borneModel, Alerte $alerteModel): void {
-    $borneId = extractBorneId($topic);
-    if ($borneId === null) {
-        workerLog('warn', "Topic inattendu, impossible d'extraire borne_id : $topic");
+function handleMessage(
+    string $topic, 
+    string $payload, 
+    Borne $borneModel, 
+    Alerte $alerteModel,
+    MqttMessage $mqttMessageModel,
+    DeviceStatus $deviceStatusModel,
+    PumpLog $pumpLogModel
+): void {
+    // 1. Enregistrer dans la table mqtt_messages
+    $mqttMessageModel->log($topic, $payload, 'in');
+
+    $stationId = extractStationId($topic);
+    if ($stationId === null) {
+        workerLog('warn', "Impossible d'extraire station_id de : $topic");
         return;
     }
 
-    $data = json_decode($payload, true);
-    if (!is_array($data)) {
-        workerLog('warn', "Payload JSON invalide sur $topic : $payload");
-        return;
+    $subTopic = substr($topic, strrpos($topic, '/') + 1);
+
+    // 2. Traitement selon le sous-topic
+    switch ($subTopic) {
+        case 'status':
+            workerLog('info', "Statut Station #$stationId : $payload");
+            $connStatut = ($payload === 'online') ? 'en ligne' : 'hors ligne';
+            
+            // Mise à jour de la table bornes (qui synchronise stations via trigger)
+            $db = \App\Core\Database::getInstance()->getConnection();
+            $stmt = $db->prepare("UPDATE bornes SET statut_connexion = :statut, dernier_ping = CURRENT_TIMESTAMP WHERE id = :id");
+            $stmt->execute(['statut' => $connStatut, 'id' => $stationId]);
+
+            // Enregistrer dans device_status
+            $deviceStatusModel->insert([
+                'station_id' => $stationId,
+                'connection_status' => $payload,
+                'error_message' => ($payload === 'offline') ? 'Device went offline (LWT)' : null
+            ]);
+            break;
+
+        case 'flow':
+            $flowRate = (float)$payload;
+            workerLog('debug', "Débit Station #$stationId : $flowRate L/min");
+            
+            $db = \App\Core\Database::getInstance()->getConnection();
+            $stmt = $db->prepare("UPDATE bornes SET debit_instantane = :debit, dernier_ping = CURRENT_TIMESTAMP WHERE id = :id");
+            $stmt->execute(['debit' => $flowRate, 'id' => $stationId]);
+            break;
+
+        case 'volume':
+            $volume = (float)$payload;
+            workerLog('debug', "Volume Station #$stationId : $volume L");
+            
+            $deviceStatusModel->insert([
+                'station_id' => $stationId,
+                'connection_status' => 'connected',
+                'volume_distributed' => $volume
+            ]);
+            break;
+
+        case 'pump':
+            workerLog('info', "Pompe Station #$stationId : $payload");
+            $vanneStatut = ($payload === 'ON') ? 'ouverte' : 'fermee';
+            
+            $db = \App\Core\Database::getInstance()->getConnection();
+            $stmt = $db->prepare("UPDATE bornes SET etat_vanne = :vanne, dernier_ping = CURRENT_TIMESTAMP WHERE id = :id");
+            $stmt->execute(['vanne' => $vanneStatut, 'id' => $stationId]);
+
+            // Log de la pompe
+            $pumpLogModel->log($stationId, $payload, 0.0, 0, 'rfid');
+            break;
+
+        case 'heartbeat':
+            $data = json_decode($payload, true);
+            if (is_array($data)) {
+                $rssi = $data['rssi'] ?? null;
+                $uptime = $data['uptime'] ?? 0;
+                workerLog('info', "Heartbeat Station #$stationId (RSSI: $rssi, Uptime: $uptime ms)");
+                
+                // Mettre à jour bornes ping
+                $borneModel->ping($stationId);
+
+                // Enregistrer dans device_status
+                $deviceStatusModel->insert([
+                    'station_id' => $stationId,
+                    'connection_status' => 'connected',
+                    'rssi' => $rssi,
+                    'uptime' => $uptime
+                ]);
+            }
+            break;
+
+        case 'log':
+            $data = json_decode($payload, true);
+            $level = $data['level'] ?? 'info';
+            $msg = $data['message'] ?? $payload;
+            workerLog('warn', "LOG Station #$stationId [$level] : $msg");
+
+            if ($level === 'error' || $level === 'alert') {
+                $alerteModel->insertWithSource([
+                    'borne_id'    => $stationId,
+                    'type_alerte' => 'technique',
+                    'description' => "[MQTT] " . $msg,
+                    'source'      => 'mqtt'
+                ]);
+            }
+            break;
+
+        case 'rfid':
+            workerLog('info', "RFID scanné Station #$stationId : $payload");
+            break;
+
+        default:
+            workerLog('debug', "Topic non géré : $topic (payload: $payload)");
+            break;
     }
-
-    // ── Topic eau/bornes/{id}/etat ────────────────────────────────────────────
-    if (str_ends_with($topic, '/etat')) {
-        workerLog('info', "Télémétrie borne #$borneId : " . json_encode($data));
-        $ok = $borneModel->updateTelemetry($borneId, [
-            'etat_vanne'         => $data['etat_vanne']      ?? 'fermee',
-            'debit_instantane'   => $data['debit']           ?? null,
-            'capteur_fuite'      => !empty($data['fuite'])   ? 1 : 0,
-            'capteur_trop_plein' => !empty($data['trop_plein']) ? 1 : 0,
-        ]);
-        if (!$ok) {
-            workerLog('error', "Échec updateTelemetry pour borne #$borneId");
-        }
-        return;
-    }
-
-    // ── Topic eau/bornes/{id}/alerte ──────────────────────────────────────────
-    if (str_ends_with($topic, '/alerte')) {
-        $typeAlerte  = trim($data['type']        ?? $data['type_alerte']  ?? '');
-        $description = trim($data['description'] ?? $data['desc']         ?? '');
-
-        if (empty($typeAlerte) || empty($description)) {
-            workerLog('warn', "Alerte MQTT mal formée borne #$borneId : $payload");
-            return;
-        }
-
-        workerLog('warn', "ALERTE MQTT borne #$borneId [$typeAlerte] : $description");
-        $ok = $alerteModel->insertWithSource([
-            'borne_id'    => $borneId,
-            'type_alerte' => $typeAlerte,
-            'description' => $description,
-            'source'      => 'mqtt',
-        ]);
-        if (!$ok) {
-            workerLog('error', "Échec insertWithSource pour borne #$borneId");
-        }
-        return;
-    }
-
-    workerLog('debug', "Topic non traité : $topic");
 }
 
-/**
- * Intercepte les commandes publiées sur MQTT (ex: par le dashboard)
- * et les consigne en base de données pour l'historique.
- */
-function handleCommandMessage(string $topic, string $payload): void {
-    $borneId = extractBorneId($topic);
-    if ($borneId === null) {
-        workerLog('warn', "Topic commande inattendu, impossible d'extraire borne_id : $topic");
+// =============================================================================
+// Polling et Envoi des commandes
+// =============================================================================
+
+function pollAndPublishCommands(MqttClient $client, CommandeBorne $commandeModel, MqttMessage $mqttMessageModel): void {
+    $pending = $commandeModel->findPending();
+    if (empty($pending)) {
         return;
     }
 
-    $data = json_decode($payload, true);
-    if (!is_array($data)) {
-        workerLog('warn', "Payload commande JSON invalide sur $topic : $payload");
-        return;
-    }
+    foreach ($pending as $cmd) {
+        $cmdId = (int)$cmd['id'];
+        $stationId = (int)$cmd['borne_id'];
+        $type = $cmd['type_commande'];
 
-    $typeCommande = $data['type'] ?? '';
-    if (!in_array($typeCommande, ['start_pompe', 'stop_pompe'], true)) {
-        workerLog('warn', "Type commande inconnu : $typeCommande");
-        return;
-    }
+        workerLog('info', "Traitement commande #$cmdId ($type) pour Station #$stationId...");
 
-    workerLog('info', "Interception commande borne #$borneId : $typeCommande");
+        // Formater le payload pour l'ESP32
+        $payloadData = [
+            'id' => $cmdId,
+            'type' => $type,
+            'ts' => date('c')
+        ];
+        
+        $payloadJson = json_encode($payloadData);
+        $topic = "water/station" . $stationId . "/command";
 
-    try {
-        $db = \App\Core\Database::getInstance()->getConnection();
-        $stmt = $db->prepare(
-            "INSERT INTO commandes_bornes (borne_id, type_commande, statut, date_creation, date_envoi)
-             VALUES (:borne_id, :type_commande, 'envoyee', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-        );
-        $stmt->execute([
-            'borne_id'      => $borneId,
-            'type_commande' => $typeCommande,
-        ]);
-        $cmdId = $db->lastInsertId();
-        workerLog('info', "  Commande enregistrée en DB (ID: $cmdId, statut: envoyee)");
-    } catch (\Throwable $e) {
-        workerLog('error', "Échec de l'enregistrement de la commande en DB : " . $e->getMessage());
+        try {
+            // Publier en QoS 1 pour assurer la délivrance
+            $client->publish($topic, $payloadJson, 1, false);
+            workerLog('info', "  Publié sur $topic : $payloadJson");
+
+            // Enregistrer dans mqtt_messages
+            $mqttMessageModel->log($topic, $payloadJson, 'out');
+
+            // Marquer comme envoyée
+            $commandeModel->markEnvoyee($cmdId);
+        } catch (\Throwable $e) {
+            workerLog('error', "  Échec de publication de la commande #$cmdId : " . $e->getMessage());
+            $commandeModel->markEchec($cmdId);
+        }
     }
 }
 
@@ -194,20 +257,22 @@ function handleCommandMessage(string $topic, string $payload): void {
 // =============================================================================
 
 workerLog('info', '====================================================');
-workerLog('info', '  MQTT Worker — Borne RFID Eau — Démarrage');
+workerLog('info', '  MQTT Worker (English Scheme) — Démarrage');
 workerLog('info', '  Broker : ' . MQTT_HOST . ':' . MQTT_PORT);
 workerLog('info', '  Client ID : ' . MQTT_CLIENT_ID);
 workerLog('info', '====================================================');
 
-$borneModel    = new Borne();
-$alerteModel   = new Alerte();
-$commandeModel = new CommandeBorne();
+$borneModel        = new Borne();
+$alerteModel       = new Alerte();
+$commandeModel     = new CommandeBorne();
+$mqttMessageModel  = new MqttMessage();
+$deviceStatusModel = new DeviceStatus();
+$pumpLogModel      = new PumpLog();
 
-$lastPollTime  = 0;
+$lastCommandPoll = 0;
 
 while (true) {
     try {
-        // ── Connexion au broker ───────────────────────────────────────────────
         workerLog('info', 'Connexion au broker MQTT ' . MQTT_HOST . ':' . MQTT_PORT . ' ...');
 
         $connectionSettings = (new ConnectionSettings())
@@ -221,27 +286,34 @@ while (true) {
         }
 
         $client = new MqttClient(MQTT_HOST, MQTT_PORT, MQTT_CLIENT_ID);
-        $client->connect($connectionSettings, true); // cleanSession = true
+        $client->connect($connectionSettings, true);
 
         workerLog('info', 'Connexion MQTT établie ✓');
 
-        // ── Abonnements ───────────────────────────────────────────────────────
-        $client->subscribe(TOPIC_ETAT, function (string $topic, string $payload) use ($borneModel, $alerteModel) {
-            handleMessage($topic, $payload, $borneModel, $alerteModel);
-        }, 0);
+        // S'abonner aux topics water/+/+
+        $client->subscribe(TOPIC_WILDCARD, function (string $topic, string $payload) use (
+            $borneModel, $alerteModel, $mqttMessageModel, $deviceStatusModel, $pumpLogModel
+        ) {
+            handleMessage($topic, $payload, $borneModel, $alerteModel, $mqttMessageModel, $deviceStatusModel, $pumpLogModel);
+        }, 1);
 
-        $client->subscribe(TOPIC_ALERTE, function (string $topic, string $payload) use ($borneModel, $alerteModel) {
-            handleMessage($topic, $payload, $borneModel, $alerteModel);
-        }, 0);
+        workerLog('info', 'Abonnement actif sur : ' . TOPIC_WILDCARD);
 
-        $client->subscribe(TOPIC_COMMANDE_SUB, function (string $topic, string $payload) {
-            handleCommandMessage($topic, $payload);
-        }, 0);
+        // Boucle non-bloquante pour permettre le polling de la base de données
+        while ($client->isConnected()) {
+            // Gérer les paquets MQTT entrants
+            $client->loop(false);
 
-        workerLog('info', 'Abonnements actifs : ' . TOPIC_ETAT . ' | ' . TOPIC_ALERTE . ' | ' . TOPIC_COMMANDE_SUB);
+            // Polling des commandes de la base de données
+            $now = time();
+            if ($now - $lastCommandPoll >= POLL_INTERVAL_S) {
+                pollAndPublishCommands($client, $commandeModel, $mqttMessageModel);
+                $lastCommandPoll = $now;
+            }
 
-        // ── Boucle de traitement ──────────────────────────────────────────────
-        $client->loop(true);
+            // Attente de 100ms
+            usleep(100000);
+        }
 
     } catch (MqttClientException $e) {
         workerLog('error', 'Erreur MQTT : ' . $e->getMessage());

@@ -152,16 +152,8 @@ class ApiController extends BaseController {
         }
 
         // Récupérer la carte spécifique avec son hash PIN
-        $db   = \App\Core\Database::getInstance()->getConnection();
-        $stmt = $db->prepare(
-            "SELECT c.uid, c.solde, c.statut, c.code_pin,
-                    a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.statut AS farmer_statut
-             FROM cartes_rfid c
-             JOIN agriculteurs a ON c.agriculteur_id = a.id
-             WHERE c.uid = :uid AND c.deleted_at IS NULL AND a.deleted_at IS NULL"
-        );
-        $stmt->execute(['uid' => $uid]);
-        $card = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $cardModel = new RFIDCard();
+        $card = $cardModel->find($uid);
 
         if (!$card) {
             $this->jsonResponse(['status' => 'error', 'message' => 'Carte introuvable.'], 404);
@@ -190,6 +182,7 @@ class ApiController extends BaseController {
             $this->jsonResponse(['status' => 'error', 'message' => 'Compte agriculteur inactif.'], 400);
         }
 
+        $db = \App\Core\Database::getInstance()->getConnection();
         // Récupérer le tarif
         $stmt2 = $db->query("SELECT param_value FROM configurations WHERE param_key = 'price_per_litre'");
         $price = ($p = $stmt2->fetchColumn()) !== false ? (float)$p : 0.200;
@@ -471,9 +464,13 @@ class ApiController extends BaseController {
 
         $borneModel  = new Borne();
         $alerteModel = new Alerte();
+        $mqttModel   = new \App\Models\MqttMessage();
+        $pumpLogModel = new \App\Models\PumpLog();
 
         $bornes  = $borneModel->findAllWithStatus();
         $alertes = $alerteModel->findActive();
+        $mqttMessages = $mqttModel->getRecent(15);
+        $pumpLogs = $pumpLogModel->getRecent(15);
 
         // Formater les données bornes pour le JS
         $bornesData = [];
@@ -508,10 +505,12 @@ class ApiController extends BaseController {
         }
 
         $this->jsonResponse([
-            'status'  => 'success',
-            'bornes'  => $bornesData,
-            'alertes' => $alertesData,
-            'ts'      => date('c'),
+            'status'        => 'success',
+            'bornes'        => $bornesData,
+            'alertes'       => $alertesData,
+            'mqtt_messages' => $mqttMessages,
+            'pump_logs'     => $pumpLogs,
+            'ts'            => date('c'),
         ]);
     }
 
@@ -538,6 +537,88 @@ class ApiController extends BaseController {
         $this->jsonResponse([
             'status' => 'success',
             'cards'  => $result
+        ]);
+    }
+
+    /**
+     * Retourne l'état en temps réel pour le Kiosque physique/virtuel connecté.
+     * Endpoint: GET index.php?route=api/bornes/kiosk-status&borne_id=1
+     */
+    public function kioskStatus() {
+        $borneId = (int)($_GET['borne_id'] ?? 1);
+
+        $db = \App\Core\Database::getInstance()->getConnection();
+
+        // 1. Lire l'état actuel de la borne
+        $stmt = $db->prepare("SELECT * FROM bornes WHERE id = :id");
+        $stmt->execute(['id' => $borneId]);
+        $borne = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$borne) {
+            $this->jsonResponse(['status' => 'error', 'message' => 'Borne introuvable.'], 404);
+        }
+
+        // 2. Récupérer le dernier message RFID dans mqtt_messages
+        $stmt = $db->prepare(
+            "SELECT id, payload, created_at 
+             FROM mqtt_messages 
+             WHERE topic = :topic AND direction = 'in' 
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(['topic' => "water/station{$borneId}/rfid"]);
+        $lastRfidMsg = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        $rfidData = null;
+        if ($lastRfidMsg) {
+            $uid = trim($lastRfidMsg['payload']);
+            $cardModel = new \App\Models\RFIDCard();
+            $card = $cardModel->find($uid);
+            if ($card) {
+                $rfidData = [
+                    'msg_id'             => (int)$lastRfidMsg['id'],
+                    'uid'                => $card['uid'],
+                    'farmer_nom'         => $card['farmer_nom'],
+                    'farmer_prenom'      => $card['farmer_prenom'],
+                    'solde'              => (float)$card['solde'],
+                    'has_pin'            => !empty($card['code_pin']),
+                    'max_volume_litres'  => (float)($borne['max_volume_litres'] ?? 500.0),
+                    'created_at'         => $lastRfidMsg['created_at']
+                ];
+            }
+        }
+
+        // 3. Récupérer le dernier message Pompe dans mqtt_messages
+        $stmt = $db->prepare(
+            "SELECT payload FROM mqtt_messages 
+             WHERE topic = :topic AND direction = 'in' 
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(['topic' => "water/station{$borneId}/pump"]);
+        $lastPumpState = $stmt->fetchColumn() ?: 'OFF';
+
+        // 4. Récupérer le dernier message Volume dans mqtt_messages
+        $stmt = $db->prepare(
+            "SELECT payload FROM mqtt_messages 
+             WHERE topic = :topic AND direction = 'in' 
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(['topic' => "water/station{$borneId}/volume"]);
+        $lastVolume = (float)($stmt->fetchColumn() ?: 0.0);
+
+        // 5. Récupérer le tarif de l'eau
+        $stmt = $db->query("SELECT param_value FROM configurations WHERE param_key = 'price_per_litre'");
+        $price = $stmt->fetchColumn();
+        $price = ($price !== false) ? (float)$price : 0.200;
+
+        $this->jsonResponse([
+            'status'             => 'success',
+            'is_online'          => ($borne['statut_connexion'] === 'en ligne'),
+            'valve_status'       => $borne['etat_vanne'] ?: 'fermee',
+            'flow_rate'          => (float)($borne['debit_instantane'] ?: 0.0),
+            'pump_state'         => $lastPumpState,
+            'volume_distributed' => $lastVolume,
+            'price_per_litre'    => $price,
+            'last_rfid'          => $rfidData
         ]);
     }
 }
