@@ -3125,3 +3125,25 @@
 [2026-07-10 11:26:41] [INFO] Pompe Station #1 : OFF
 [2026-07-10 11:26:41] [DEBUG] Débit Station #1 : 0 L/min
 [2026-07-10 11:26:41] [DEBUG] Volume Station #1 : 0 L
+[2026-07-10 11:26:44] [INFO] Pompe Station #1 : OFF
+[2026-07-10 11:26:44] [DEBUG] Débit Station #1 : 0 L/min
+[2026-07-10 11:26:44] [DEBUG] Volume Station #1 : 0 L
+[2026-07-10 11:26:45] [ERROR] Erreur MQTT : [66] Transferring data over socket failed: Reading data from the socket failed. Has it been closed?
+[2026-07-10 11:26:45] [INFO] Reconnexion dans 5 secondes...
+[2026-07-10 11:26:47] [INFO] Pompe Station #1 : OFF
+[2026-07-10 11:26:47] [DEBUG] Débit Station #1 : 0 L/min
+[2026-07-10 11:26:47] [DEBUG] Volume Station #1 : 0 L
+[2026-07-10 11:26:49] [INFO] Heartbeat Station #1 (RSSI: -54, Uptime: 693090 ms)
+[2026-07-10 11:26:50] [INFO] Connexion au broker MQTT 127.0.0.1:1883 ...
+[2026-07-10 11:26:50] [INFO] Connexion MQTT établie ✓
+[2026-07-10 11:26:50] [INFO] Abonnement actif sur : water/+/+
+[2026-07-10 11:26:50] [INFO] Statut Station #1 : online
+[2026-07-10 11:26:50] [INFO] Pompe Station #1 : OFF
+[2026-07-10 11:26:50] [DEBUG] Débit Station #1 : 0 L/min
+[2026-07-10 11:26:50] [DEBUG] Volume Station #1 : 0 L
+[2026-07-10 11:26:53] [INFO] Pompe Station #1 : OFF
+[2026-07-10 11:26:53] [DEBUG] Débit Station #1 : 0 L/min
+[2026-07-10 11:26:53] [DEBUG] Volume Station #1 : 0 L
+[2026-07-10 11:26:56] [INFO] Pompe Station #1 : OFF
+[2026-07-10 11:26:56] [DEBUG] Débit Station #1 : 0 L/min
+[2026-07-10 11:26:56] [DEBUG] Volume Station #1 : 0 L
