@@ -898,6 +898,13 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     mqttAdminOverride = false;
     emergencyStop("Arrêt manuel à distance");
   } 
+  else if (typeCmd == "cancel_session" || typeCmd == "cancel") {
+    if (currentState != STATE_DISTRIBUTING) {
+      Serial.println(F("[MQTT] Commande d'annulation reçue. Réinitialisation de la session..."));
+      beep(2, 100);
+      resetSession();
+    }
+  }
   else if (typeCmd == "start_pompe" || typeCmd == "start_pump") {
     if (currentState != STATE_IDLE && currentState != STATE_ALERT) {
       Serial.println(F("[MQTT] Ignoré : pompe déjà active ou en alerte."));

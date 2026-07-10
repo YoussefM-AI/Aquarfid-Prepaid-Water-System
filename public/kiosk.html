@@ -1295,7 +1295,13 @@
       document.getElementById('pin-error-msg').style.display = 'none';
     }
 
+    function sendKioskCancel() {
+      fetch('index.php?route=api/bornes/kiosk-cancel&borne_id=1', { method: 'POST' })
+        .catch(err => console.error("Erreur d'envoi de la commande d'annulation:", err));
+    }
+
     function pinCancel() {
+      sendKioskCancel();
       activeCard = null;
       pinReset();
       showKioskStep(1);
@@ -1495,6 +1501,7 @@
 
     // Cancel refill process
     function cancelRefill() {
+      sendKioskCancel();
       activeCard = null;
       showKioskStep(1);
     }

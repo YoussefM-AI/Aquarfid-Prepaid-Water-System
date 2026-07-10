@@ -621,4 +621,27 @@ class ApiController extends BaseController {
             'last_rfid'          => $rfidData
         ]);
     }
+
+    /**
+     * Envoie une commande d'annulation de session à l'ESP32.
+     * Appelé par le kiosque lors d'un clic sur "Annuler".
+     * Endpoint : POST index.php?route=api/bornes/kiosk-cancel
+     */
+    public function kioskCancel() {
+        $params  = $this->getRequestParams();
+        $borneId = (int)($params['borne_id'] ?? 1);
+
+        $commandeModel = new CommandeBorne();
+        $commandeId = $commandeModel->insert([
+            'borne_id'      => $borneId,
+            'type_commande' => 'cancel_session',
+            'demande_par'   => null // Pas d'admin nécessaire pour une annulation kiosque
+        ]);
+
+        if ($commandeId === false) {
+            $this->jsonResponse(['status' => 'error', 'message' => 'Erreur enregistrement annulation.'], 500);
+        }
+
+        $this->jsonResponse(['status' => 'success', 'message' => 'Annulation enregistrée.']);
+    }
 }
