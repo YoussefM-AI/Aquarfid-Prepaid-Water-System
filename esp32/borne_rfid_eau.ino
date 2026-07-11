@@ -1,4 +1,4 @@
-/**
+/*
  * ============================================================
  * BORNE RFID EAU AGRICOLE — ESP32
  * ============================================================
@@ -764,9 +764,6 @@ void resetSession() {
   pinBuffer = "";
   alertSent = false;
   
-  // Re-initialiser le lecteur RFID pour le reveiller si baisse de tension (ex: buzzer, relais)
-  rfid.PCD_Init();
-
   currentState = STATE_IDLE;
   setLed(GREEN);
   displayIdle();
