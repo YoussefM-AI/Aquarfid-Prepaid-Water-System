@@ -47,7 +47,7 @@ use App\Models\PumpLog;
 // ── Configuration MQTT ────────────────────────────────────────────────────────
 define('MQTT_HOST',      '127.0.0.1');  // Broker Mosquitto local (Laragon)
 define('MQTT_PORT',      1883);
-define('MQTT_CLIENT_ID', 'php_water_worker_' . gethostname());
+define('MQTT_CLIENT_ID', 'php_water_worker_' . gethostname() . '_' . uniqid());
 define('MQTT_USERNAME',  'water_user');
 define('MQTT_PASSWORD',  'water_pass123');
 define('MQTT_KEEPALIVE', 60);           // Secondes
@@ -222,8 +222,16 @@ function pollAndPublishCommands(MqttClient $client, CommandeBorne $commandeModel
         $cmdId = (int)$cmd['id'];
         $stationId = (int)$cmd['borne_id'];
         $type = $cmd['type_commande'];
+        $volume = null;
 
-        workerLog('info', "Traitement commande #$cmdId ($type) pour Station #$stationId...");
+        // Si la commande contient des paramètres (ex: set_volume:150)
+        if (strpos($type, ':') !== false) {
+            $parts = explode(':', $type);
+            $type = $parts[0];
+            $volume = (float)$parts[1];
+        }
+
+        workerLog('info', "Traitement commande #$cmdId ($type" . ($volume !== null ? " : {$volume}L" : "") . ") pour Station #$stationId...");
 
         // Formater le payload pour l'ESP32
         $payloadData = [
@@ -231,6 +239,10 @@ function pollAndPublishCommands(MqttClient $client, CommandeBorne $commandeModel
             'type' => $type,
             'ts' => date('c')
         ];
+
+        if ($volume !== null) {
+            $payloadData['volume'] = $volume;
+        }
         
         $payloadJson = json_encode($payloadData);
         $topic = "water/station" . $stationId . "/command";
@@ -302,7 +314,7 @@ while (true) {
         // Boucle non-bloquante pour permettre le polling de la base de données
         while ($client->isConnected()) {
             // Gérer les paquets MQTT entrants
-            $client->loop(false);
+            $client->loopOnce(microtime(true), false);
 
             // Polling des commandes de la base de données
             $now = time();

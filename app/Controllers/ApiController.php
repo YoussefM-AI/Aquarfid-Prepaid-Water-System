@@ -113,6 +113,13 @@ class ApiController extends BaseController {
         $solde = (float)$card['solde'];
         $maxVolumeLitres = ($price > 0) ? floor(($solde / $price) * 100) / 100 : 0.00;
 
+        if ($solde <= 0 || $maxVolumeLitres < 1.0) {
+            $this->jsonResponse([
+                'status'  => 'error',
+                'message' => '💳 Solde insuffisant (' . number_format($solde, 3, '.', '') . ' DT). Veuillez recharger votre carte.'
+            ], 400);
+        }
+
         $this->jsonResponse([
             'status'          => 'success',
             'message'         => 'Carte validée avec succès.',
@@ -188,6 +195,22 @@ class ApiController extends BaseController {
         $price = ($p = $stmt2->fetchColumn()) !== false ? (float)$p : 0.200;
         $solde = (float)$card['solde'];
         $maxVolumeLitres = ($price > 0) ? floor(($solde / $price) * 100) / 100 : 0.00;
+
+        if ($solde <= 0 || $maxVolumeLitres < 1.0) {
+            $this->jsonResponse([
+                'status'  => 'error',
+                'message' => '💳 Solde insuffisant (' . number_format($solde, 3, '.', '') . ' DT). Veuillez recharger votre carte.'
+            ], 400);
+        }
+
+        // Enregistrer la commande pin_verified pour l'ESP32
+        $borneId = (int)($params['borne_id'] ?? 1);
+        $commandeModel = new CommandeBorne();
+        $commandeModel->insert([
+            'borne_id'      => $borneId,
+            'type_commande' => 'pin_verified',
+            'demande_par'   => null // Kiosque auto-auth
+        ]);
 
         $this->jsonResponse([
             'status'            => 'success',
@@ -272,6 +295,14 @@ class ApiController extends BaseController {
         $newBalance = $card ? (float)$card['solde'] : 0.000;
 
         if ($success) {
+            // Enregistrer la commande set_volume pour l'ESP32
+            $commandeModel = new CommandeBorne();
+            $commandeModel->insert([
+                'borne_id'      => $borneId,
+                'type_commande' => 'set_volume:' . $volumeDistribue,
+                'demande_par'   => null
+            ]);
+
             $this->jsonResponse([
                 'status' => 'success',
                 'message' => 'Transaction enregistrée avec succès.',

@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'water/rfid-distribution',
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
-        'reference' => null,
+        'pretty_version' => 'dev-main',
+        'version' => 'dev-main',
+        'reference' => '0127eeb163331e55f979080120f22567192ff281',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -38,9 +38,9 @@
             'dev_requirement' => false,
         ),
         'water/rfid-distribution' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
-            'reference' => null,
+            'pretty_version' => 'dev-main',
+            'version' => 'dev-main',
+            'reference' => '0127eeb163331e55f979080120f22567192ff281',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

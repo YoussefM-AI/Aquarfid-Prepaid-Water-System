@@ -259,13 +259,21 @@ class Database {
             FOR EACH ROW
             BEGIN
                 INSERT INTO `stations` (id, name, location, status, last_ping, valve_status, flow_rate)
-                VALUES (NEW.id, NEW.nom, NEW.localisation, NEW.statut_connexion, NEW.dernier_ping, NEW.etat_vanne, NEW.debit_instantane)
+                VALUES (
+                    NEW.id, 
+                    NEW.nom, 
+                    NEW.localisation, 
+                    IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'), 
+                    NEW.dernier_ping, 
+                    IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'), 
+                    NEW.debit_instantane
+                )
                 ON DUPLICATE KEY UPDATE
                     name = NEW.nom,
                     location = NEW.localisation,
-                    status = NEW.statut_connexion,
+                    status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
                     last_ping = NEW.dernier_ping,
-                    valve_status = NEW.etat_vanne,
+                    valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
                     flow_rate = NEW.debit_instantane;
             END;");
 
@@ -276,9 +284,9 @@ class Database {
                 UPDATE `stations` SET
                     name = NEW.nom,
                     location = NEW.localisation,
-                    status = NEW.statut_connexion,
+                    status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
                     last_ping = NEW.dernier_ping,
-                    valve_status = NEW.etat_vanne,
+                    valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
                     flow_rate = NEW.debit_instantane
                 WHERE id = NEW.id;
             END;");
@@ -295,11 +303,18 @@ class Database {
             FOR EACH ROW
             BEGIN
                 INSERT INTO `rfid_cards` (uid, farmer_id, balance, status, pin_code, deleted_at)
-                VALUES (NEW.uid, NEW.agriculteur_id, NEW.solde, NEW.statut, NEW.code_pin, NEW.deleted_at)
+                VALUES (
+                    NEW.uid, 
+                    NEW.agriculteur_id, 
+                    NEW.solde, 
+                    IF(NEW.statut = 'active', 'active', 'suspended'), 
+                    NEW.code_pin, 
+                    NEW.deleted_at
+                )
                 ON DUPLICATE KEY UPDATE
                     farmer_id = NEW.agriculteur_id,
                     balance = NEW.solde,
-                    status = NEW.statut,
+                    status = IF(NEW.statut = 'active', 'active', 'suspended'),
                     pin_code = NEW.code_pin,
                     deleted_at = NEW.deleted_at;
             END;");
@@ -311,7 +326,7 @@ class Database {
                 UPDATE `rfid_cards` SET
                     farmer_id = NEW.agriculteur_id,
                     balance = NEW.solde,
-                    status = NEW.statut,
+                    status = IF(NEW.statut = 'active', 'active', 'suspended'),
                     pin_code = NEW.code_pin,
                     deleted_at = NEW.deleted_at,
                     last_used_at = NEW.derniere_utilisation
@@ -330,14 +345,23 @@ class Database {
             FOR EACH ROW
             BEGIN
                 INSERT INTO `water_transactions` (id, card_uid, station_id, volume_requested, volume_distributed, amount_debited, status, created_at)
-                VALUES (NEW.id, NEW.carte_rfid_uid, NEW.borne_id, NEW.volume_demande, NEW.volume_distribue, NEW.montant_debite, NEW.statut, NEW.date_heure)
+                VALUES (
+                    NEW.id, 
+                    NEW.carte_rfid_uid, 
+                    NEW.borne_id, 
+                    NEW.volume_demande, 
+                    NEW.volume_distribue, 
+                    NEW.montant_debite, 
+                    IF(NEW.statut = 'reussie', 'success', 'failed'), 
+                    NEW.date_heure
+                )
                 ON DUPLICATE KEY UPDATE
                     card_uid = NEW.carte_rfid_uid,
                     station_id = NEW.borne_id,
                     volume_requested = NEW.volume_demande,
                     volume_distributed = NEW.volume_distribue,
                     amount_debited = NEW.montant_debite,
-                    status = NEW.statut,
+                    status = IF(NEW.statut = 'reussie', 'success', 'failed'),
                     created_at = NEW.date_heure;
             END;");
 
@@ -373,11 +397,30 @@ class Database {
             FOR EACH ROW
             BEGIN
                 INSERT INTO `commands` (id, station_id, command_type, status, created_by, created_at, sent_at, ack_at)
-                VALUES (NEW.id, NEW.borne_id, NEW.type_commande, NEW.statut, NEW.demande_par, NEW.date_creation, NEW.date_envoi, NEW.date_ack)
+                VALUES (
+                    NEW.id, 
+                    NEW.borne_id, 
+                    NEW.type_commande, 
+                    CASE 
+                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                        WHEN NEW.statut = 'ack' THEN 'ack' 
+                        ELSE 'failed' 
+                    END, 
+                    NEW.demande_par, 
+                    NEW.date_creation, 
+                    NEW.date_envoi, 
+                    NEW.date_ack
+                )
                 ON DUPLICATE KEY UPDATE
                     station_id = NEW.borne_id,
                     command_type = NEW.type_commande,
-                    status = NEW.statut,
+                    status = CASE 
+                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                        WHEN NEW.statut = 'ack' THEN 'ack' 
+                        ELSE 'failed' 
+                    END,
                     created_by = NEW.demande_par,
                     created_at = NEW.date_creation,
                     sent_at = NEW.date_envoi,
@@ -389,7 +432,12 @@ class Database {
             FOR EACH ROW
             BEGIN
                 UPDATE `commands` SET
-                    status = NEW.statut,
+                    status = CASE 
+                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                        WHEN NEW.statut = 'ack' THEN 'ack' 
+                        ELSE 'failed' 
+                    END,
                     sent_at = NEW.date_envoi,
                     ack_at = NEW.date_ack
                 WHERE id = NEW.id;
@@ -401,6 +449,92 @@ class Database {
             BEGIN
                 DELETE FROM `commands` WHERE id = OLD.id;
             END;");
+
+            // Auto-synchronisation initiale si les tables anglaises sont vides
+            $countStations = $this->pdo->query("SELECT COUNT(*) FROM `stations`")->fetchColumn();
+            if ($countStations == 0) {
+                $this->pdo->exec("INSERT INTO `stations` (id, name, location, status, api_key, last_ping, valve_status, flow_rate)
+                    SELECT 
+                        id, 
+                        nom, 
+                        localisation, 
+                        IF(statut_connexion = 'en ligne', 'online', 'offline'), 
+                        api_key, 
+                        dernier_ping, 
+                        IF(etat_vanne = 'ouverte', 'open', 'closed'), 
+                        debit_instantane 
+                    FROM `bornes`
+                    ON DUPLICATE KEY UPDATE id = VALUES(id)");
+            }
+
+            $countRfidCards = $this->pdo->query("SELECT COUNT(*) FROM `rfid_cards`")->fetchColumn();
+            if ($countRfidCards == 0) {
+                $this->pdo->exec("INSERT INTO `rfid_cards` (uid, farmer_id, balance, status, pin_code, deleted_at, associated_at, last_used_at)
+                    SELECT 
+                        uid, 
+                        agriculteur_id, 
+                        solde, 
+                        IF(statut = 'active', 'active', 'suspended'), 
+                        code_pin, 
+                        deleted_at, 
+                        date_association, 
+                        derniere_utilisation 
+                    FROM `cartes_rfid`
+                    ON DUPLICATE KEY UPDATE uid = VALUES(uid)");
+            }
+
+            $countWaterTransactions = $this->pdo->query("SELECT COUNT(*) FROM `water_transactions`")->fetchColumn();
+            if ($countWaterTransactions == 0) {
+                $this->pdo->exec("INSERT INTO `water_transactions` (id, card_uid, station_id, volume_requested, volume_distributed, amount_debited, status, created_at)
+                    SELECT 
+                        id, 
+                        carte_rfid_uid, 
+                        borne_id, 
+                        volume_demande, 
+                        volume_distribue, 
+                        montant_debite, 
+                        IF(statut = 'reussie', 'success', 'failed'), 
+                        date_heure 
+                    FROM `transactions`
+                    ON DUPLICATE KEY UPDATE id = VALUES(id)");
+            }
+
+            $countAlerts = $this->pdo->query("SELECT COUNT(*) FROM `alerts`")->fetchColumn();
+            if ($countAlerts == 0) {
+                $this->pdo->exec("INSERT INTO `alerts` (id, station_id, alert_type, description, resolved, resolved_at, source, created_at)
+                    SELECT 
+                        id, 
+                        borne_id, 
+                        type_alerte, 
+                        description, 
+                        resolu, 
+                        date_resolution, 
+                        source, 
+                        date_heure 
+                    FROM `alertes`
+                    ON DUPLICATE KEY UPDATE id = VALUES(id)");
+            }
+
+            $countCommands = $this->pdo->query("SELECT COUNT(*) FROM `commands`")->fetchColumn();
+            if ($countCommands == 0) {
+                $this->pdo->exec("INSERT INTO `commands` (id, station_id, command_type, status, created_by, created_at, sent_at, ack_at)
+                    SELECT 
+                        id, 
+                        borne_id, 
+                        type_commande, 
+                        CASE 
+                            WHEN statut = 'en_attente' THEN 'pending' 
+                            WHEN statut = 'envoyee' THEN 'sent' 
+                            WHEN statut = 'ack' THEN 'ack' 
+                            ELSE 'failed' 
+                        END, 
+                        demande_par, 
+                        date_creation, 
+                        date_envoi, 
+                        date_ack 
+                    FROM `commandes_bornes`
+                    ON DUPLICATE KEY UPDATE id = VALUES(id)");
+            }
 
 
         } catch (PDOException $e) {
