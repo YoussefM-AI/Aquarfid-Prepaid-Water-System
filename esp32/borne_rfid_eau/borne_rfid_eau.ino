@@ -578,7 +578,7 @@ void handleDistributing() {
     beep(5, 300);
     setLed(RED);
     finalizeTransaction("interrompue_erreur");
-    currentState = STATE_ALERT;
+    currentState = STATE_ERROR;
     stateEnterTime = now;
     return;
   }
