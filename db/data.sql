@@ -147,7 +147,7 @@ INSERT INTO `cartes_rfid` (`uid`, `agriculteur_id`, `solde`, `statut`, `code_pin
 CREATE TABLE IF NOT EXISTS `commandes_bornes` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `borne_id` int NOT NULL,
-  `type_commande` enum('start_pompe','stop_pompe') NOT NULL COMMENT 'Type de commande envoyée à la borne',
+  `type_commande` varchar(50) NOT NULL COMMENT 'Type de commande envoyée à la borne',
   `statut` enum('en_attente','envoyee','ack','echec') NOT NULL DEFAULT 'en_attente' COMMENT 'Cycle de vie de la commande',
   `demande_par` int DEFAULT NULL COMMENT 'ID de l''administrateur ayant émis la commande',
   `date_creation` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,

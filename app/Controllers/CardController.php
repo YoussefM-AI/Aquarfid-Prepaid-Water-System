@@ -107,6 +107,38 @@ class CardController extends BaseController {
     }
 
     /**
+     * Modifie directement le solde d'une carte.
+     */
+    public function updateBalance() {
+        $this->requirePermission('perm_can_recharge');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->redirect('dashboard#supervision');
+        }
+
+        $uid     = trim($_POST['uid'] ?? '');
+        $balance = (float) ($_POST['balance'] ?? 0.00);
+
+        if (empty($uid) || $balance < 0) {
+            Session::setFlash('error', "UID de carte invalide ou solde incorrect.");
+            $this->redirect('dashboard#supervision');
+        }
+
+        try {
+            $success = $this->cardModel->updateBalance($uid, $balance);
+            if ($success) {
+                Session::setFlash('success', "Le solde de la carte a été mis à jour à " . number_format($balance, 3) . " DT avec succès.");
+            } else {
+                Session::setFlash('error', "Échec de la mise à jour du solde de la carte.");
+            }
+        } catch (Exception $e) {
+            Session::setFlash('error', $e->getMessage());
+        }
+
+        $this->redirect('dashboard#supervision');
+    }
+
+    /**
      * Active ou suspend une carte RFID.
      */
     public function toggleStatus() {

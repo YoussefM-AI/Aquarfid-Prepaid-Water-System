@@ -325,6 +325,9 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                                                         <button onclick="openRechargeModal('<?= $c['uid'] ?>', '<?= htmlspecialchars($c['farmer_prenom'] . ' ' . $c['farmer_nom']) ?>', '<?= $c['solde'] ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-emerald-50 text-emerald-600 hover:border-emerald-300 rounded-lg transition-all" title="Recharger">
                                                             <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i>
                                                         </button>
+                                                        <button onclick="openUpdateBalanceModal('<?= $c['uid'] ?>', '<?= htmlspecialchars($c['farmer_prenom'] . ' ' . $c['farmer_nom']) ?>', '<?= $c['solde'] ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all" title="Modifier le solde">
+                                                            <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
+                                                        </button>
                                                     <?php endif; ?>
                                                     <?php if ($manageClients): ?>
                                                         <?php if ($c['statut'] === 'active'): ?>
@@ -332,7 +335,7 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                                                         <?php else: ?>
                                                             <a href="index.php?route=cards/status&uid=<?= $c['uid'] ?>&status=active" class="p-1.5 bg-white border border-slate-200 hover:bg-emerald-50 text-emerald-600 hover:border-emerald-300 rounded-lg transition-all" title="Activer"><i data-lucide="check" class="w-3.5 h-3.5"></i></a>
                                                         <?php endif; ?>
-                                                        <button onclick="openEditClientModal(<?= $c['agriculteur_id'] ?>, '<?= htmlspecialchars($c['farmer_nom']) ?>', '<?= htmlspecialchars($c['farmer_prenom']) ?>', '<?= htmlspecialchars($c['farmer_telephone']) ?>', '<?= htmlspecialchars($c['farmer_email']) ?>', '<?= htmlspecialchars($c['statut']) ?>', '<?= (strlen($c['code_pin']) === 4) ? htmlspecialchars($c['code_pin']) : '' ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
+                                                        <button onclick="openEditClientModal(<?= $c['agriculteur_id'] ?>, '<?= addslashes(htmlspecialchars($c['farmer_nom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_prenom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_telephone'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_email'] ?? '')) ?>', '<?= htmlspecialchars($c['farmer_statut'] ?? '') ?>', '<?= (!empty($c['code_pin']) && strlen($c['code_pin']) === 4) ? htmlspecialchars($c['code_pin']) : '' ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
                                                         <a href="index.php?route=farmers/delete&id=<?= $c['agriculteur_id'] ?>" onclick="return confirm('Supprimer cet agriculteur ?')" class="p-1.5 bg-white border border-slate-200 hover:bg-red-50 text-red-600 hover:border-red-300 rounded-lg transition-all" title="Supprimer"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></a>
                                                     <?php endif; ?>
                                                 </div>
@@ -416,8 +419,10 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                                             <?php endif; ?>
                                         </td>
                                         <td class="px-4 py-2.5 text-right">
-                                            <button onclick="openAdminModal(<?= $ad['id'] ?>, '<?= htmlspecialchars($ad['nom']) ?>', '<?= htmlspecialchars($ad['prenom']) ?>', '<?= htmlspecialchars($ad['email']) ?>', '<?= htmlspecialchars($ad['statut']) ?>', '<?= htmlspecialchars($ad['role']) ?>', <?= $ad['perm_view_clients'] ?>, <?= $ad['perm_view_balances'] ?>, <?= $ad['perm_view_transactions'] ?>, <?= $ad['perm_manage_clients'] ?>, <?= $ad['perm_can_recharge'] ?>)" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all shadow-sm" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
-                                            <a href="index.php?route=admins/delete&id=<?= $ad['id'] ?>" onclick="return confirm('Supprimer ce compte ?')" class="p-1.5 bg-white border border-slate-200 hover:bg-red-50 text-red-600 hover:border-red-300 rounded-lg transition-all shadow-sm" title="Supprimer"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></a>
+                                            <div class="flex items-center justify-end gap-1">
+                                                <button onclick="openAdminModal(<?= $ad['id'] ?>, '<?= htmlspecialchars($ad['nom']) ?>', '<?= htmlspecialchars($ad['prenom']) ?>', '<?= htmlspecialchars($ad['email']) ?>', '<?= htmlspecialchars($ad['statut']) ?>', '<?= htmlspecialchars($ad['role']) ?>', <?= $ad['perm_view_clients'] ?>, <?= $ad['perm_view_balances'] ?>, <?= $ad['perm_view_transactions'] ?>, <?= $ad['perm_manage_clients'] ?>, <?= $ad['perm_can_recharge'] ?>)" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all shadow-sm" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
+                                                <a href="index.php?route=admins/delete&id=<?= $ad['id'] ?>" onclick="return confirm('Supprimer ce compte ?')" class="p-1.5 bg-white border border-slate-200 hover:bg-red-50 text-red-600 hover:border-red-300 rounded-lg transition-all shadow-sm" title="Supprimer"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></a>
+                                            </div>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -452,6 +457,32 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
             <div class="flex gap-2 pt-2">
                 <button type="button" onclick="closeRechargeModal()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all text-center">Annuler</button>
                 <button type="submit" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Valider</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="update-balance-modal" class="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm hidden">
+    <div class="w-full max-w-sm bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl animate-fade-in mx-4">
+        <div class="flex items-center justify-between mb-5 border-b border-slate-100 pb-3">
+            <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <i data-lucide="credit-card" class="w-5 h-5 text-blue-500"></i> Modifier le solde
+            </h3>
+            <button onclick="closeUpdateBalanceModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-4 h-4"></i></button>
+        </div>
+        <form action="index.php?route=cards/update-balance" method="POST" class="space-y-5">
+            <input type="hidden" name="uid" id="update-balance-uid">
+            <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-4">
+                <p class="text-xs text-slate-500 mb-1">Agriculteur : <strong id="update-balance-farmer-name" class="text-slate-800">--</strong></p>
+                <p class="text-xs text-slate-500">Solde actuel : <strong id="update-balance-current-balance" class="text-blue-600 font-bold">0.000 DT</strong></p>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1.5">Nouveau solde (DT)</label>
+                <input type="text" name="balance" id="update-balance-new-amount" required placeholder="0.000" class="block w-full px-3 py-2 bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 text-slate-800 text-sm font-bold rounded-lg outline-none transition-all">
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button type="button" onclick="closeUpdateBalanceModal()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition-all text-center">Annuler</button>
+                <button type="submit" class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-xs transition-all shadow-sm">Valider</button>
             </div>
         </form>
     </div>
@@ -681,6 +712,15 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
         document.getElementById('recharge-modal').classList.remove('hidden');
     }
     function closeRechargeModal() { document.getElementById('recharge-modal').classList.add('hidden'); }
+
+    function openUpdateBalanceModal(uid, name, balance) {
+        document.getElementById('update-balance-uid').value = uid;
+        document.getElementById('update-balance-farmer-name').textContent = name;
+        document.getElementById('update-balance-current-balance').textContent = parseFloat(balance).toFixed(3) + ' DT';
+        document.getElementById('update-balance-new-amount').value = parseFloat(balance).toFixed(3);
+        document.getElementById('update-balance-modal').classList.remove('hidden');
+    }
+    function closeUpdateBalanceModal() { document.getElementById('update-balance-modal').classList.add('hidden'); }
 
     function openClientModal() {
         ['prenom', 'nom', 'phone', 'email', 'uid', 'pin'].forEach(id => {

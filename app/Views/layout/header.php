@@ -315,18 +315,7 @@ $currentRoute = $_GET['route'] ?? 'dashboard';
                         <span>Supervision</span>
                     </a>
                     <?php if (isset($currentAdmin) && $currentAdmin['role'] === 'admin'): ?>
-                        <a href="index.php?route=dashboard#config"
-                           class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-slate-800/20"
-                           style="color:var(--text-muted)">
-                            <i data-lucide="settings" class="w-4 h-4"></i>
-                            <span>Configuration</span>
-                        </a>
-                        <a href="index.php?route=dashboard#users"
-                           class="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-slate-800/20"
-                           style="color:var(--text-muted)">
-                            <i data-lucide="shield-check" class="w-4 h-4"></i>
-                            <span>Personnel</span>
-                        </a>
+                        <!-- Configuration and Personnel links removed from navbar headers -->
                     <?php endif; ?>
                 </nav>
 

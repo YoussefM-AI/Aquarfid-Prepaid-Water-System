@@ -39,7 +39,7 @@ class Database {
         $options = [
             PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
+            PDO::ATTR_EMULATE_PREPARES   => true,
         ];
 
         try {
@@ -125,11 +125,10 @@ class Database {
                         COMMENT 'Timestamp de la dernière télémétrie MQTT reçue'");
             }
 
-            // Migration MQTT : table commandes_bornes
             $this->pdo->exec("CREATE TABLE IF NOT EXISTS `commandes_bornes` (
                 `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
                 `borne_id`      INT NOT NULL,
-                `type_commande` ENUM('start_pompe','stop_pompe') NOT NULL
+                `type_commande` VARCHAR(50) NOT NULL
                                 COMMENT 'Type de commande envoyée à la borne',
                 `statut`        ENUM('en_attente','envoyee','ack','echec') NOT NULL DEFAULT 'en_attente'
                                 COMMENT 'Cycle de vie de la commande',
@@ -254,201 +253,205 @@ class Database {
             }
 
             // Triggers de synchronisation automatique vers les tables en anglais
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_insert`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_bornes_insert` AFTER INSERT ON `bornes`
-            FOR EACH ROW
-            BEGIN
-                INSERT INTO `stations` (id, name, location, status, last_ping, valve_status, flow_rate)
-                VALUES (
-                    NEW.id, 
-                    NEW.nom, 
-                    NEW.localisation, 
-                    IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'), 
-                    NEW.dernier_ping, 
-                    IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'), 
-                    NEW.debit_instantane
-                )
-                ON DUPLICATE KEY UPDATE
-                    name = NEW.nom,
-                    location = NEW.localisation,
-                    status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
-                    last_ping = NEW.dernier_ping,
-                    valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
-                    flow_rate = NEW.debit_instantane;
-            END;");
+            try {
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_insert`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_bornes_insert` AFTER INSERT ON `bornes`
+                FOR EACH ROW
+                BEGIN
+                    INSERT INTO `stations` (id, name, location, status, last_ping, valve_status, flow_rate)
+                    VALUES (
+                        NEW.id, 
+                        NEW.nom, 
+                        NEW.localisation, 
+                        IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'), 
+                        NEW.dernier_ping, 
+                        IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'), 
+                        NEW.debit_instantane
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        name = NEW.nom,
+                        location = NEW.localisation,
+                        status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
+                        last_ping = NEW.dernier_ping,
+                        valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
+                        flow_rate = NEW.debit_instantane;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_update`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_bornes_update` AFTER UPDATE ON `bornes`
-            FOR EACH ROW
-            BEGIN
-                UPDATE `stations` SET
-                    name = NEW.nom,
-                    location = NEW.localisation,
-                    status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
-                    last_ping = NEW.dernier_ping,
-                    valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
-                    flow_rate = NEW.debit_instantane
-                WHERE id = NEW.id;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_update`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_bornes_update` AFTER UPDATE ON `bornes`
+                FOR EACH ROW
+                BEGIN
+                    UPDATE `stations` SET
+                        name = NEW.nom,
+                        location = NEW.localisation,
+                        status = IF(NEW.statut_connexion = 'en ligne', 'online', 'offline'),
+                        last_ping = NEW.dernier_ping,
+                        valve_status = IF(NEW.etat_vanne = 'ouverte', 'open', 'closed'),
+                        flow_rate = NEW.debit_instantane
+                    WHERE id = NEW.id;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_delete`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_bornes_delete` AFTER DELETE ON `bornes`
-            FOR EACH ROW
-            BEGIN
-                DELETE FROM `stations` WHERE id = OLD.id;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_bornes_delete`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_bornes_delete` AFTER DELETE ON `bornes`
+                FOR EACH ROW
+                BEGIN
+                    DELETE FROM `stations` WHERE id = OLD.id;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_insert`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_insert` AFTER INSERT ON `cartes_rfid`
-            FOR EACH ROW
-            BEGIN
-                INSERT INTO `rfid_cards` (uid, farmer_id, balance, status, pin_code, deleted_at)
-                VALUES (
-                    NEW.uid, 
-                    NEW.agriculteur_id, 
-                    NEW.solde, 
-                    IF(NEW.statut = 'active', 'active', 'suspended'), 
-                    NEW.code_pin, 
-                    NEW.deleted_at
-                )
-                ON DUPLICATE KEY UPDATE
-                    farmer_id = NEW.agriculteur_id,
-                    balance = NEW.solde,
-                    status = IF(NEW.statut = 'active', 'active', 'suspended'),
-                    pin_code = NEW.code_pin,
-                    deleted_at = NEW.deleted_at;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_insert`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_insert` AFTER INSERT ON `cartes_rfid`
+                FOR EACH ROW
+                BEGIN
+                    INSERT INTO `rfid_cards` (uid, farmer_id, balance, status, pin_code, deleted_at)
+                    VALUES (
+                        NEW.uid, 
+                        NEW.agriculteur_id, 
+                        NEW.solde, 
+                        IF(NEW.statut = 'active', 'active', 'suspended'), 
+                        NEW.code_pin, 
+                        NEW.deleted_at
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        farmer_id = NEW.agriculteur_id,
+                        balance = NEW.solde,
+                        status = IF(NEW.statut = 'active', 'active', 'suspended'),
+                        pin_code = NEW.code_pin,
+                        deleted_at = NEW.deleted_at;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_update`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_update` AFTER UPDATE ON `cartes_rfid`
-            FOR EACH ROW
-            BEGIN
-                UPDATE `rfid_cards` SET
-                    farmer_id = NEW.agriculteur_id,
-                    balance = NEW.solde,
-                    status = IF(NEW.statut = 'active', 'active', 'suspended'),
-                    pin_code = NEW.code_pin,
-                    deleted_at = NEW.deleted_at,
-                    last_used_at = NEW.derniere_utilisation
-                WHERE uid = NEW.uid;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_update`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_update` AFTER UPDATE ON `cartes_rfid`
+                FOR EACH ROW
+                BEGIN
+                    UPDATE `rfid_cards` SET
+                        farmer_id = NEW.agriculteur_id,
+                        balance = NEW.solde,
+                        status = IF(NEW.statut = 'active', 'active', 'suspended'),
+                        pin_code = NEW.code_pin,
+                        deleted_at = NEW.deleted_at,
+                        last_used_at = NEW.derniere_utilisation
+                    WHERE uid = NEW.uid;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_delete`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_delete` AFTER DELETE ON `cartes_rfid`
-            FOR EACH ROW
-            BEGIN
-                DELETE FROM `rfid_cards` WHERE uid = OLD.uid;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_cartes_rfid_delete`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_cartes_rfid_delete` AFTER DELETE ON `cartes_rfid`
+                FOR EACH ROW
+                BEGIN
+                    DELETE FROM `rfid_cards` WHERE uid = OLD.uid;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_transactions_insert`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_transactions_insert` AFTER INSERT ON `transactions`
-            FOR EACH ROW
-            BEGIN
-                INSERT INTO `water_transactions` (id, card_uid, station_id, volume_requested, volume_distributed, amount_debited, status, created_at)
-                VALUES (
-                    NEW.id, 
-                    NEW.carte_rfid_uid, 
-                    NEW.borne_id, 
-                    NEW.volume_demande, 
-                    NEW.volume_distribue, 
-                    NEW.montant_debite, 
-                    IF(NEW.statut = 'reussie', 'success', 'failed'), 
-                    NEW.date_heure
-                )
-                ON DUPLICATE KEY UPDATE
-                    card_uid = NEW.carte_rfid_uid,
-                    station_id = NEW.borne_id,
-                    volume_requested = NEW.volume_demande,
-                    volume_distributed = NEW.volume_distribue,
-                    amount_debited = NEW.montant_debite,
-                    status = IF(NEW.statut = 'reussie', 'success', 'failed'),
-                    created_at = NEW.date_heure;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_transactions_insert`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_transactions_insert` AFTER INSERT ON `transactions`
+                FOR EACH ROW
+                BEGIN
+                    INSERT INTO `water_transactions` (id, card_uid, station_id, volume_requested, volume_distributed, amount_debited, status, created_at)
+                    VALUES (
+                        NEW.id, 
+                        NEW.carte_rfid_uid, 
+                        NEW.borne_id, 
+                        NEW.volume_demande, 
+                        NEW.volume_distribue, 
+                        NEW.montant_debite, 
+                        IF(NEW.statut = 'reussie', 'success', 'failed'), 
+                        NEW.date_heure
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        card_uid = NEW.carte_rfid_uid,
+                        station_id = NEW.borne_id,
+                        volume_requested = NEW.volume_demande,
+                        volume_distributed = NEW.volume_distribue,
+                        amount_debited = NEW.montant_debite,
+                        status = IF(NEW.statut = 'reussie', 'success', 'failed'),
+                        created_at = NEW.date_heure;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_insert`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_alertes_insert` AFTER INSERT ON `alertes`
-            FOR EACH ROW
-            BEGIN
-                INSERT INTO `alerts` (id, station_id, alert_type, description, resolved, resolved_at, source, created_at)
-                VALUES (NEW.id, NEW.borne_id, NEW.type_alerte, NEW.description, NEW.resolu, NEW.date_resolution, NEW.source, NEW.date_heure)
-                ON DUPLICATE KEY UPDATE
-                    station_id = NEW.borne_id,
-                    alert_type = NEW.type_alerte,
-                    description = NEW.description,
-                    resolved = NEW.resolu,
-                    resolved_at = NEW.date_resolution,
-                    source = NEW.source,
-                    created_at = NEW.date_heure;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_insert`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_alertes_insert` AFTER INSERT ON `alertes`
+                FOR EACH ROW
+                BEGIN
+                    INSERT INTO `alerts` (id, station_id, alert_type, description, resolved, resolved_at, source, created_at)
+                    VALUES (NEW.id, NEW.borne_id, NEW.type_alerte, NEW.description, NEW.resolu, NEW.date_resolution, NEW.source, NEW.date_heure)
+                    ON DUPLICATE KEY UPDATE
+                        station_id = NEW.borne_id,
+                        alert_type = NEW.type_alerte,
+                        description = NEW.description,
+                        resolved = NEW.resolu,
+                        resolved_at = NEW.date_resolution,
+                        source = NEW.source,
+                        created_at = NEW.date_heure;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_update`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_alertes_update` AFTER UPDATE ON `alertes`
-            FOR EACH ROW
-            BEGIN
-                UPDATE `alerts` SET
-                    resolved = NEW.resolu,
-                    resolved_at = NEW.date_resolution,
-                    description = NEW.description
-                WHERE id = NEW.id;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_alertes_update`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_alertes_update` AFTER UPDATE ON `alertes`
+                FOR EACH ROW
+                BEGIN
+                    UPDATE `alerts` SET
+                        resolved = NEW.resolu,
+                        resolved_at = NEW.date_resolution,
+                        description = NEW.description
+                    WHERE id = NEW.id;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_insert`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_insert` AFTER INSERT ON `commandes_bornes`
-            FOR EACH ROW
-            BEGIN
-                INSERT INTO `commands` (id, station_id, command_type, status, created_by, created_at, sent_at, ack_at)
-                VALUES (
-                    NEW.id, 
-                    NEW.borne_id, 
-                    NEW.type_commande, 
-                    CASE 
-                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
-                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
-                        WHEN NEW.statut = 'ack' THEN 'ack' 
-                        ELSE 'failed' 
-                    END, 
-                    NEW.demande_par, 
-                    NEW.date_creation, 
-                    NEW.date_envoi, 
-                    NEW.date_ack
-                )
-                ON DUPLICATE KEY UPDATE
-                    station_id = NEW.borne_id,
-                    command_type = NEW.type_commande,
-                    status = CASE 
-                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
-                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
-                        WHEN NEW.statut = 'ack' THEN 'ack' 
-                        ELSE 'failed' 
-                    END,
-                    created_by = NEW.demande_par,
-                    created_at = NEW.date_creation,
-                    sent_at = NEW.date_envoi,
-                    ack_at = NEW.date_ack;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_insert`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_insert` AFTER INSERT ON `commandes_bornes`
+                FOR EACH ROW
+                BEGIN
+                    INSERT INTO `commands` (id, station_id, command_type, status, created_by, created_at, sent_at, ack_at)
+                    VALUES (
+                        NEW.id, 
+                        NEW.borne_id, 
+                        NEW.type_commande, 
+                        CASE 
+                            WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                            WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                            WHEN NEW.statut = 'ack' THEN 'ack' 
+                            ELSE 'failed' 
+                        END, 
+                        NEW.demande_par, 
+                        NEW.date_creation, 
+                        NEW.date_envoi, 
+                        NEW.date_ack
+                    )
+                    ON DUPLICATE KEY UPDATE
+                        station_id = NEW.borne_id,
+                        command_type = NEW.type_commande,
+                        status = CASE 
+                            WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                            WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                            WHEN NEW.statut = 'ack' THEN 'ack' 
+                            ELSE 'failed' 
+                        END,
+                        created_by = NEW.demande_par,
+                        created_at = NEW.date_creation,
+                        sent_at = NEW.date_envoi,
+                        ack_at = NEW.date_ack;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_update`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_update` AFTER UPDATE ON `commandes_bornes`
-            FOR EACH ROW
-            BEGIN
-                UPDATE `commands` SET
-                    status = CASE 
-                        WHEN NEW.statut = 'en_attente' THEN 'pending' 
-                        WHEN NEW.statut = 'envoyee' THEN 'sent' 
-                        WHEN NEW.statut = 'ack' THEN 'ack' 
-                        ELSE 'failed' 
-                    END,
-                    sent_at = NEW.date_envoi,
-                    ack_at = NEW.date_ack
-                WHERE id = NEW.id;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_update`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_update` AFTER UPDATE ON `commandes_bornes`
+                FOR EACH ROW
+                BEGIN
+                    UPDATE `commands` SET
+                        status = CASE 
+                            WHEN NEW.statut = 'en_attente' THEN 'pending' 
+                            WHEN NEW.statut = 'envoyee' THEN 'sent' 
+                            WHEN NEW.statut = 'ack' THEN 'ack' 
+                            ELSE 'failed' 
+                        END,
+                        sent_at = NEW.date_envoi,
+                        ack_at = NEW.date_ack
+                    WHERE id = NEW.id;
+                END;");
 
-            $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_delete`;");
-            $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_delete` AFTER DELETE ON `commandes_bornes`
-            FOR EACH ROW
-            BEGIN
-                DELETE FROM `commands` WHERE id = OLD.id;
-            END;");
+                $this->pdo->exec("DROP TRIGGER IF EXISTS `trg_commandes_bornes_delete`;");
+                $this->pdo->exec("CREATE TRIGGER `trg_commandes_bornes_delete` AFTER DELETE ON `commandes_bornes`
+                FOR EACH ROW
+                BEGIN
+                    DELETE FROM `commands` WHERE id = OLD.id;
+                END;");
+            } catch (\Throwable $e) {
+                // Supprimer les exceptions de création simultanée de triggers
+            }
 
             // Auto-synchronisation initiale si les tables anglaises sont vides
             $countStations = $this->pdo->query("SELECT COUNT(*) FROM `stations`")->fetchColumn();

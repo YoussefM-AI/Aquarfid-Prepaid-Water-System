@@ -295,14 +295,6 @@ class ApiController extends BaseController {
         $newBalance = $card ? (float)$card['solde'] : 0.000;
 
         if ($success) {
-            // Enregistrer la commande set_volume pour l'ESP32
-            $commandeModel = new CommandeBorne();
-            $commandeModel->insert([
-                'borne_id'      => $borneId,
-                'type_commande' => 'set_volume:' . $volumeDistribue,
-                'demande_par'   => null
-            ]);
-
             $this->jsonResponse([
                 'status' => 'success',
                 'message' => 'Transaction enregistrée avec succès.',
@@ -443,12 +435,21 @@ class ApiController extends BaseController {
             $this->jsonResponse(['status' => 'error', 'message' => 'borne_id invalide ou manquant.'], 400);
         }
 
-        $allowedTypes = ['start_pompe', 'stop_pompe'];
+        $allowedTypes = ['start_pompe', 'stop_pompe', 'set_volume', 'restart_esp'];
         if (!in_array($typeCommande, $allowedTypes, true)) {
             $this->jsonResponse([
                 'status'  => 'error',
                 'message' => 'type_commande invalide. Valeurs acceptées : ' . implode(', ', $allowedTypes)
             ], 400);
+        }
+
+        $dbTypeCommande = $typeCommande;
+        if ($typeCommande === 'set_volume') {
+            $volume = isset($params['volume']) ? (float)$params['volume'] : 0.00;
+            if ($volume <= 0) {
+                $this->jsonResponse(['status' => 'error', 'message' => 'Volume invalide pour la commande set_volume.'], 400);
+            }
+            $dbTypeCommande = 'set_volume:' . $volume;
         }
 
         // Vérifier que la borne existe
@@ -461,7 +462,7 @@ class ApiController extends BaseController {
         $commandeModel = new CommandeBorne();
         $commandeId    = $commandeModel->insert([
             'borne_id'      => $borneId,
-            'type_commande' => $typeCommande,
+            'type_commande' => $dbTypeCommande,
             'demande_par'   => $admin['id'],
         ]);
 
@@ -674,5 +675,45 @@ class ApiController extends BaseController {
         }
 
         $this->jsonResponse(['status' => 'success', 'message' => 'Annulation enregistrée.']);
+    }
+
+    /**
+     * Commande de démarrage de la distribution depuis le Kiosque
+     * Le Kiosque valide le volume et envoie cette commande pour que l'ESP32 commence la distribution.
+     * Le débit effectif du solde et l'enregistrement de la transaction auront lieu en fin de distribution.
+     *
+     * Endpoint : POST index.php?route=api/bornes/kiosk-start
+     */
+    public function kioskStart() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $this->jsonResponse(['status' => 'error', 'message' => 'Méthode non autorisée. Utilisez POST.'], 405);
+        }
+
+        $params = $this->getRequestParams();
+        $borneId = (int)($params['borne_id'] ?? 1);
+        $uid = strtoupper(trim($params['uid'] ?? ''));
+        $volumeDemande = (float)($params['volume_demande'] ?? 0.00);
+
+        if (empty($uid) || $borneId <= 0 || $volumeDemande <= 0) {
+            $this->jsonResponse(['status' => 'error', 'message' => 'Paramètres invalides ou manquants.'], 400);
+        }
+
+        // Insérer la commande set_volume pour l'ESP32
+        $commandeModel = new CommandeBorne();
+        $commandeId = $commandeModel->insert([
+            'borne_id'      => $borneId,
+            'type_commande' => 'set_volume:' . $volumeDemande,
+            'demande_par'   => null // Démarrage via Kiosque
+        ]);
+
+        if ($commandeId === false) {
+            $this->jsonResponse(['status' => 'error', 'message' => 'Erreur lors de l\'enregistrement de la commande de volume.'], 500);
+        }
+
+        $this->jsonResponse([
+            'status' => 'success',
+            'message' => 'Commande de distribution enregistrée avec succès.',
+            'commande_id' => $commandeId
+        ]);
     }
 }

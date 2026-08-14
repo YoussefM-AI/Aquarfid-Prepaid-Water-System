@@ -37,6 +37,7 @@ class Router {
             // Cartes RFID
             'cards'            => ['controller' => 'App\Controllers\CardController', 'method' => 'index'],
             'cards/recharge'   => ['controller' => 'App\Controllers\CardController', 'method' => 'recharge'],
+            'cards/update-balance' => ['controller' => 'App\Controllers\CardController', 'method' => 'updateBalance'],
             'cards/status'     => ['controller' => 'App\Controllers\CardController', 'method' => 'toggleStatus'],
             'cards/set-pin'    => ['controller' => 'App\Controllers\CardController', 'method' => 'setPin'],
 
@@ -59,6 +60,7 @@ class Router {
             'api/bornes/status-live'  => ['controller' => 'App\Controllers\ApiController', 'method' => 'statusLive'],
             'api/bornes/kiosk-status' => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskStatus'],
             'api/bornes/kiosk-cancel' => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskCancel'],
+            'api/bornes/kiosk-start'  => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskStart'],
 
             // Gestion des alertes (dashboard admin)
             'alertes/resolve'         => ['controller' => 'App\Controllers\DashboardController', 'method' => 'resolveAlerte'],

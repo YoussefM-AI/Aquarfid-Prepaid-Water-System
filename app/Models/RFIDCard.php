@@ -14,7 +14,7 @@ class RFIDCard extends BaseModel {
      * Récupère toutes les cartes RFID avec les infos de l'agriculteur associé.
      */
     public function findAll(): array {
-        $sql = "SELECT c.*, a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.telephone AS farmer_telephone, a.email AS farmer_email,
+        $sql = "SELECT c.*, a.nom AS farmer_nom, a.prenom AS farmer_prenom, a.telephone AS farmer_telephone, a.email AS farmer_email, a.statut AS farmer_statut,
                 COALESCE((SELECT SUM(volume_distribue) FROM transactions WHERE carte_rfid_uid = c.uid), 0) AS total_distribue
                 FROM cartes_rfid c
                 JOIN agriculteurs a ON c.agriculteur_id = a.id
@@ -77,6 +77,21 @@ class RFIDCard extends BaseModel {
         return $stmt->execute([
             'uid'    => $uid,
             'amount' => $amount
+        ]);
+    }
+
+    /**
+     * Modifie directement le solde d'une carte.
+     */
+    public function updateBalance(string $uid, float $balance): bool {
+        if ($balance < 0) {
+            throw new Exception("Le solde ne peut pas être négatif.");
+        }
+        
+        $stmt = $this->db->prepare("UPDATE cartes_rfid SET solde = :balance WHERE uid = :uid");
+        return $stmt->execute([
+            'uid'     => $uid,
+            'balance' => $balance
         ]);
     }
 

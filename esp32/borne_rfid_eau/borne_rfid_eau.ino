@@ -21,19 +21,19 @@
 // ============================================================
 
 // --- WiFi ---
-const char *WIFI_SSID = "TUNISIETELECOM-2.4G-fP4N";
-const char *WIFI_PASSWORD = "A9zHHHVM";
+const char *WIFI_SSID = "YOUSSEF";
+const char *WIFI_PASSWORD = "12345678";
 
 // --- Serveur API ---
-const char *SERVER_BASE = "http://192.168.100.13/water/public/index.php";
+const char *SERVER_BASE = "http://192.168.137.1/water/public/index.php";
 
 const int BORNE_ID = 1;          // ID de cette borne dans la DB
-const int WIFI_TIMEOUT = 15000;  // Timeout connexion WiFi (ms)
+const int WIFI_TIMEOUT = 3000;   // Timeout rapide connexion WiFi (3s) pour ne pas bloquer le scan RFID
 const int HTTP_TIMEOUT = 8000;   // Timeout requête HTTP (ms)
 const int PING_INTERVAL = 30000; // Intervalle keep-alive (30s)
 
 // --- Broker MQTT ---
-const char *MQTT_BROKER = "192.168.100.13";
+const char *MQTT_BROKER = "192.168.137.1";
 const int MQTT_PORT = 1883;
 const char *MQTT_USER = "water_user";
 const char *MQTT_PASS = "water_pass123";
@@ -41,8 +41,8 @@ const int MQTT_PUB_INTERVAL = 3000; // Intervalle publication état (ms)
 const unsigned long MQTT_OVERRIDE_TIMEOUT = 300000; // Timeout de sécurité de l'override admin (5 minutes = 300000 ms)
 
 // --- Paramètres de distribution ---
-const float PULSES_PER_LITRE = 10.0;  // Impulsions par litre (à calibrer)
-const float DEBIT_MIN_L_MIN = 5.0;    // Débit minimum normal (L/min)
+const float PULSES_PER_LITRE = 450.0; // Calibration YF-S201 : 450 impulsions = 1 Litre (0.45 impulsion/mL)
+const float DEBIT_MIN_L_MIN = 0.1;    // Débit minimum normal (L/min)
 const float DEBIT_MAX_L_MIN = 200.0;  // Débit max avant alerte fuite (L/min)
 const float FUITE_SEUIL_LITRES = 2.0; // Litres perdus avant alerte fuite
 const int MANQUE_EAU_TIMEOUT = 10000; // Timeout sans débit = manque eau (ms)
@@ -57,17 +57,23 @@ const int VOLUME_MAX_LITRES = 2000;   // Volume max par transaction (L)
 #define PIN_RFID_RST 22
 
 // Débitmètre (entrée impulsion interrupt)
-#define PIN_FLOW_METER 34 // Nécessite R externe PULL-UP 10kΩ
+// WARNING: GPIO4 is also listed in the keypad column pins: byte colPins[COLS] = {4, 16, 17, 21};
+// If you are using a physical keypad, using GPIO4 for the flow meter will cause conflicts.
+#define PIN_FLOW_METER 4 // Avec résistance de pull-up interne (GPIO4)
 
-// Électrovanne (via relais — LOW = ouvert, HIGH = fermé)
-#define PIN_VALVE 26
+// Électrovanne / Pompe (via relais — Active-LOW déclenché par LOW (0V), désactivé par INPUT)
+#define PIN_VALVE 16
+#define VALVE_OPEN  LOW   // LOW (0V) active l'optocoupleur du relais 5V
 
-// Capteurs de sécurité
+// Capteurs de sécurité (Désactivés par défaut pour éviter les fausses alertes sur broches flottantes)
+#define ENABLE_SAFETY_SENSORS false
 #define PIN_OVERFLOW 35    // Nécessite R externe PULL-DOWN 10kΩ
 #define PIN_LEAK_SENSOR 39 // Nécessite R externe PULL-DOWN 10kΩ
 
 // Signalisation
 #define PIN_BUZZER 32
+#define BUZZER_ON  LOW   // LOW = Buzzer émet un son
+#define BUZZER_OFF HIGH  // HIGH = Buzzer ÉTEINT au repos
 #define PIN_LED_GREEN 25
 #define PIN_LED_ORANGE 27
 #define PIN_LED_RED 33
@@ -200,7 +206,14 @@ unsigned long mqttOverrideStartTime = 0; // Heure de début de l'override admin
 // ISR : DÉBITMÈTRE
 // ============================================================
 
-void IRAM_ATTR onFlowPulse() { pulseCount++; }
+volatile unsigned long lastFlowMicros = 0;
+void IRAM_ATTR onFlowPulse() {
+  unsigned long now = micros();
+  if (now - lastFlowMicros > 2000) { // 2 ms anti-rebond pour éliminer le bruit électrique
+    pulseCount++;
+    lastFlowMicros = now;
+  }
+}
 
 // ============================================================
 // SETUP
@@ -215,6 +228,7 @@ void setup() {
   // Broches
   pinMode(PIN_VALVE, OUTPUT);
   pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_BUZZER, BUZZER_OFF);
   pinMode(PIN_LED_GREEN, OUTPUT);
   pinMode(PIN_LED_ORANGE, OUTPUT); // Corrigé
   pinMode(PIN_LED_RED, OUTPUT);
@@ -232,6 +246,7 @@ void setup() {
   Serial.println(F("[RFID] Lecteur initialisé"));
 
   // Interrupt débitmètre
+  pinMode(PIN_FLOW_METER, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PIN_FLOW_METER), onFlowPulse, FALLING);
 
   // WiFi
@@ -262,11 +277,15 @@ void loop() {
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println(F("[WIFI] Connexion perdue — tentative de reconnexion..."));
-    if (currentState == STATE_DISTRIBUTING) {
-      emergencyStop("Perte de communication WiFi");
+    static unsigned long lastWifiRetry = 0;
+    if (now - lastWifiRetry > 10000) {
+      lastWifiRetry = now;
+      Serial.println(F("[WIFI] Connexion perdue — tentative de reconnexion..."));
+      if (currentState == STATE_DISTRIBUTING) {
+        emergencyStop("Perte de communication WiFi");
+      }
+      connectWiFi();
     }
-    connectWiFi();
   }
 
   if (WiFi.status() == WL_CONNECTED) {
@@ -498,16 +517,17 @@ void handleVolumeSelect() {
 
   if (key == '#') {
     if (volumeBuffer.length() > 0) {
-      float vol = volumeBuffer.toFloat();
-      if (vol <= 0 || vol > session.maxVolumeLitres) {
+      float volMl = volumeBuffer.toFloat();
+      float maxMl = session.maxVolumeLitres * 1000.0;
+      if (volMl <= 0 || volMl > maxMl) {
         displayMessage("VOLUME INVALIDE",
-                       "Max: " + String(session.maxVolumeLitres, 1) + " L");
+                       "Max: " + String((int)maxMl) + " mL");
         beep(2, 200);
         delay(2000);
         volumeBuffer = "";
         return;
       }
-      session.requestedLitres = vol;
+      session.requestedLitres = volMl / 1000.0;
       volumeBuffer = "";
       startDistribution();
     }
@@ -528,9 +548,9 @@ void handleVolumeSelect() {
   }
 
   if (key == 'B') {
-    static const int presets[] = {50, 100, 200, 500};
+    static const float presets[] = {0.100, 0.250, 0.500, 1.000}; // Presets : 100mL, 250mL, 500mL, 1000mL
     static int presetIdx = 0;
-    float vol = min((float)presets[presetIdx % 4], session.maxVolumeLitres);
+    float vol = min(presets[presetIdx % 4], session.maxVolumeLitres);
     session.requestedLitres = vol;
     presetIdx++;
     volumeBuffer = "";
@@ -539,17 +559,20 @@ void handleVolumeSelect() {
 }
 
 void startDistribution() {
-  noInterrupts();
-  session.startPulseCount = pulseCount;
-  lastPulseCountFlow = pulseCount;
-  interrupts();
-
   session.distributedLitres = 0;
   session.debitedAmount = 0;
-  session.startTime = millis();
-  session.lastFlowTime = millis();
 
   valveOpen();
+  delay(300); // Laisse le temps au relais de s'activer et d'atténuer le rebond électrique de démarrage
+
+  noInterrupts();
+  pulseCount = 0; // Réinitialise complètement le compteur après stabilisation du relais
+  session.startPulseCount = 0;
+  lastPulseCountFlow = 0;
+  interrupts();
+
+  session.startTime = millis();
+  session.lastFlowTime = millis();
   setLed(GREEN);
   beep(1, 100);
   displayDistribution();
@@ -569,41 +592,68 @@ void handleDistributing() {
   float distributed = pulsesToLitres(delta);
   session.distributedLitres = distributed;
 
-  if (distributed > 0.01) {
+  // Track if pulses are increasing to reset flow timer
+  static unsigned long lastKnownPulses = 0;
+  static bool distributionStarted = false;
+
+  if (!distributionStarted || now - stateEnterTime < 200) {
+    lastKnownPulses = currentPulses;
+    distributionStarted = true;
+  }
+
+  if (currentPulses > lastKnownPulses) {
+    lastKnownPulses = currentPulses;
     session.lastFlowTime = now;
-  } else if (now - session.lastFlowTime > MANQUE_EAU_TIMEOUT) {
+  }
+
+  // Priming timeout: 20 seconds; Flow loss timeout: 10 seconds
+  unsigned long currentTimeout = (distributed < 0.01) ? 20000 : 10000;
+
+  if (now - session.lastFlowTime > currentTimeout) {
     valveClose();
+    distributionStarted = false; // Reset flag
+    currentState = STATE_ERROR;
+    publishStatus(); // Publish final status immediately (pump OFF, final litres)
+    displayDistributionProgress(session.distributedLitres, session.requestedLitres); // Print final progress to Serial Monitor
     sendAlert("manque_eau", "Débit nul. Possible manque d'eau.");
     displayMessage("MANQUE D'EAU", "Arrêt automatique.");
     beep(5, 300);
     setLed(RED);
     finalizeTransaction("interrompue_erreur");
-    currentState = STATE_ERROR;
     stateEnterTime = now;
     return;
   }
 
   if (distributed >= session.requestedLitres) {
     valveClose();
+    distributionStarted = false; // Reset flag
     session.distributedLitres = session.requestedLitres;
+    currentState = STATE_DONE;
+    publishStatus(); // Publish final status immediately (pump OFF, target litres)
+    displayDistributionProgress(session.distributedLitres, session.requestedLitres); // Print final 100% progress to Serial Monitor
     beep(3, 200);
     setLed(GREEN);
     finalizeTransaction("reussie");
     displaySuccess();
-    currentState = STATE_DONE;
     stateEnterTime = now;
     return;
   }
 
   static unsigned long lastDisplay = 0;
-  if (now - lastDisplay > 2000) {
+  if (now - lastDisplay > 200) {
     displayDistributionProgress(distributed, session.requestedLitres);
     lastDisplay = now;
+  }
+
+  static unsigned long lastFastMqtt = 0;
+  if (now - lastFastMqtt > 500) {
+    publishStatus();
+    lastFastMqtt = now;
   }
 }
 
 void handleDone() {
-  if (millis() - stateEnterTime > 10000)
+  if (millis() - stateEnterTime > 2000) // Attente de 2 secondes avant de réinitialiser la session (snappy reset)
     resetSession();
 }
 
@@ -626,8 +676,8 @@ void checkSafety() {
     static bool overflowWasHigh = false;
     static bool leakWasHigh = false;
 
-    bool overflowNow = (digitalRead(PIN_OVERFLOW) == HIGH);
-    bool leakNow = (digitalRead(PIN_LEAK_SENSOR) == HIGH);
+    bool overflowNow = ENABLE_SAFETY_SENSORS ? (digitalRead(PIN_OVERFLOW) == HIGH) : false;
+    bool leakNow = ENABLE_SAFETY_SENSORS ? (digitalRead(PIN_LEAK_SENSOR) == HIGH) : false;
 
     if (overflowNow || leakNow) {
       // Fermeture immédiate de la vanne si elle était ouverte via override
@@ -661,7 +711,7 @@ void checkSafety() {
     return;
   }
 
-  if (digitalRead(PIN_OVERFLOW) == HIGH) {
+  if (ENABLE_SAFETY_SENSORS && digitalRead(PIN_OVERFLOW) == HIGH) {
     valveClose();
     sendAlert("trop_plein", "Trop-plein activé. Arrêt immédiat.");
     displayMessage("TROP-PLEIN !", "Arrêt d'urgence.");
@@ -673,7 +723,7 @@ void checkSafety() {
     return;
   }
 
-  if (digitalRead(PIN_LEAK_SENSOR) == HIGH) {
+  if (ENABLE_SAFETY_SENSORS && digitalRead(PIN_LEAK_SENSOR) == HIGH) {
     valveClose();
     sendAlert("fuite", "Sonde de fuite sol activée.");
     displayMessage("FUITE DÉTECTÉE", "Arrêt d'urgence.");
@@ -749,6 +799,8 @@ void pingServer() {
 void emergencyStop(const String &reason) {
   valveClose();
   mqttAdminOverride = false;
+  currentState = STATE_ERROR;
+  publishStatus(); // Publish final status immediately (pump OFF, final litres)
   beep(5, 200);
   setLed(RED);
   if (session.distributedLitres > 0.01)
@@ -757,8 +809,14 @@ void emergencyStop(const String &reason) {
   resetSession();
 }
 
-void valveOpen() { digitalWrite(PIN_VALVE, LOW); }
-void valveClose() { digitalWrite(PIN_VALVE, HIGH); }
+void valveOpen() {
+  pinMode(PIN_VALVE, OUTPUT);
+  digitalWrite(PIN_VALVE, VALVE_OPEN);
+}
+
+void valveClose() {
+  pinMode(PIN_VALVE, INPUT); // Haute impédance pour désactiver complètement le relais 5V
+}
 
 float pulsesToLitres(unsigned long pulses) {
   return (float)pulses / PULSES_PER_LITRE;
@@ -773,12 +831,13 @@ void ledsOff() { setLed(OFF); }
 
 void beep(int count, int durationMs) {
   for (int i = 0; i < count; i++) {
-    digitalWrite(PIN_BUZZER, HIGH);
+    digitalWrite(PIN_BUZZER, BUZZER_ON);
     delay(durationMs);
-    digitalWrite(PIN_BUZZER, LOW);
+    digitalWrite(PIN_BUZZER, BUZZER_OFF);
     if (i < count - 1)
       delay(durationMs / 2);
   }
+  digitalWrite(PIN_BUZZER, BUZZER_OFF);
 }
 
 void resetSession() {
@@ -791,6 +850,8 @@ void resetSession() {
   mqttAdminOverride = false;
   mqttOverrideStartTime = 0;
   
+  rfid.PCD_Init(); // Ré-initialiser le lecteur MFRC522 pour garantir le scan fluide
+
   currentState = STATE_IDLE;
   setLed(GREEN);
   displayIdle();
@@ -799,11 +860,11 @@ void resetSession() {
 // ---------------- AFFICHAGE SÉRIE ----------------
 void displayIdle() { Serial.println(F("Borne Prête - En attente carte")); }
 void displayWelcome() { Serial.println(F("Bienvenue")); }
-void displayVolumePrompt() { Serial.println(F("Saisir Volume")); }
+void displayVolumePrompt() { Serial.println(F("Saisir Volume en mL (ex: 250)")); }
 void displayPinProgress(int digits) { Serial.println(F("PIN saisi...")); }
 void displayDistribution() { Serial.println(F("Distribution en cours...")); }
 void displayDistributionProgress(float done, float total) {
-  Serial.printf("Avancement : %.2f / %.2f L\n", done, total);
+  Serial.printf("Avancement : %.3f L (%d mL) / %.3f L (%d mL)\n", done, (int)(done * 1000.0), total, (int)(total * 1000.0));
 }
 void displaySuccess() { Serial.println(F("Succès")); }
 void displayMessage(const String &title, const String &msg) {
@@ -812,8 +873,10 @@ void displayMessage(const String &title, const String &msg) {
 
 // ---------------- HTTP ----------------
 bool httpGet(const String &url, JsonDocument &response) {
-  if (WiFi.status() != WL_CONNECTED)
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[HTTP] WiFi non connecté !"));
     return false;
+  }
   HTTPClient http;
   http.begin(url);
   http.setTimeout(HTTP_TIMEOUT);
@@ -821,10 +884,18 @@ bool httpGet(const String &url, JsonDocument &response) {
   int code = http.GET();
   String body = http.getString();
   http.end();
-  if (code <= 0)
+  if (code <= 0) {
+    Serial.printf("[HTTP] Échec GET (code %d: %s)\n", code, HTTPClient::errorToString(code).c_str());
     return false;
+  }
   DeserializationError err = deserializeJson(response, body);
-  return (err == DeserializationError::Ok);
+  if (err != DeserializationError::Ok) {
+    Serial.printf("[HTTP] Erreur JSON desérialisation: %s\n", err.c_str());
+    Serial.println("[HTTP] Réponse brute du serveur:");
+    Serial.println(body);
+    return false;
+  }
+  return true;
 }
 
 bool httpPost(const String &url, const String &jsonBody,
@@ -846,17 +917,27 @@ bool httpPost(const String &url, const String &jsonBody,
 }
 
 void connectWiFi() {
+  Serial.print("[WIFI] Connexion à ");
+  Serial.println(WIFI_SSID);
+  WiFi.disconnect();
+  delay(100);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
+    Serial.print(".");
     checkSafety(); // Garde la détection de fuite active pendant l'attente
     if (millis() - start > WIFI_TIMEOUT) {
+      Serial.println();
+      Serial.println("[WIFI] Échec de connexion (Timeout)");
       setLed(ORANGE);
       return;
     }
   }
+  Serial.println();
+  Serial.print("[WIFI] Connecté ! Adresse IP: ");
+  Serial.println(WiFi.localIP());
   setLed(GREEN);
 }
 
@@ -866,6 +947,8 @@ void publishHeartbeat();
 void connectMQTT() {
   if (mqttClient.connected())
     return;
+  Serial.print("[MQTT] Connexion au broker ");
+  Serial.println(MQTT_BROKER);
   String clientId = "esp32_borne_" + String(BORNE_ID) + "_" +
                     String((uint32_t)ESP.getEfuseMac(), HEX);
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
@@ -992,7 +1075,7 @@ void publishStatus() {
 
   // 1. État de la pompe/relais (ON/OFF)
   String topicPump = stationPrefix + "/pump";
-  String pumpState = (digitalRead(PIN_VALVE) == LOW) ? "ON" : "OFF";
+  String pumpState = (currentState == STATE_DISTRIBUTING) ? "ON" : "OFF";
   mqttClient.publish(topicPump.c_str(), pumpState.c_str(), false);
 
   // 2. Débit instantané en L/min
@@ -1002,7 +1085,7 @@ void publishStatus() {
 
   // 3. Volume d'eau distribué cumulé
   String topicVol = stationPrefix + "/volume";
-  String volStr = String(session.distributedLitres, 2);
+  String volStr = String(session.distributedLitres, 3); // 3 decimal places to match Serial Monitor mL precision exactly
   mqttClient.publish(topicVol.c_str(), volStr.c_str(), false);
 }
 
