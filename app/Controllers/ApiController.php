@@ -69,6 +69,40 @@ class ApiController extends BaseController {
             $borneModel->ping($borneId);
         }
 
+        $db = \App\Core\Database::getInstance()->getConnection();
+        $borneId = (int)($params['borne_id'] ?? 1);
+
+        // Enregistrer immédiatement l'événement de scan dans mqtt_messages pour notifier le Kiosque en temps réel
+        try {
+            $stmtMsg = $db->prepare(
+                "INSERT INTO mqtt_messages (topic, payload, direction, created_at) 
+                 VALUES (:topic, :payload, 'in', NOW())"
+            );
+            $stmtMsg->execute([
+                'topic'   => "water/station{$borneId}/rfid",
+                'payload' => $uid
+            ]);
+
+            // Réinitialiser l'état de la pompe à OFF et le volume à 0.00 dès le scan de la carte
+            $stmtPump = $db->prepare(
+                "INSERT INTO mqtt_messages (topic, payload, direction, created_at) 
+                 VALUES (:topic, 'OFF', 'in', NOW())"
+            );
+            $stmtPump->execute(['topic' => "water/station{$borneId}/pump"]);
+
+            $stmtVol = $db->prepare(
+                "INSERT INTO mqtt_messages (topic, payload, direction, created_at) 
+                 VALUES (:topic, '0.00', 'in', NOW())"
+            );
+            $stmtVol->execute(['topic' => "water/station{$borneId}/volume"]);
+
+            // Mettre à jour l'état de la borne
+            $stmtBorne = $db->prepare("UPDATE bornes SET dernier_ping = NOW(), statut_connexion = 'en ligne' WHERE id = :id");
+            $stmtBorne->execute(['id' => $borneId]);
+        } catch (\Throwable $e) {
+            // Ignorer si la table de log n'est pas accessible
+        }
+
         $cardModel = new RFIDCard();
         $card = $cardModel->find($uid);
 
@@ -104,7 +138,6 @@ class ApiController extends BaseController {
         }
 
         // Récupérer le tarif actuel de l'eau
-        $db = \App\Core\Database::getInstance()->getConnection();
         $stmt = $db->query("SELECT param_value FROM configurations WHERE param_key = 'price_per_litre'");
         $price = $stmt->fetchColumn();
         $price = ($price !== false) ? (float)$price : 0.200;
@@ -590,6 +623,11 @@ class ApiController extends BaseController {
             $this->jsonResponse(['status' => 'error', 'message' => 'Borne introuvable.'], 404);
         }
 
+        // Récupérer le tarif de l'eau
+        $stmt = $db->query("SELECT param_value FROM configurations WHERE param_key = 'price_per_litre'");
+        $price = $stmt->fetchColumn();
+        $price = ($price !== false) ? (float)$price : 0.200;
+
         // 2. Récupérer le dernier message RFID dans mqtt_messages
         $stmt = $db->prepare(
             "SELECT id, payload, created_at 
@@ -606,14 +644,26 @@ class ApiController extends BaseController {
             $cardModel = new \App\Models\RFIDCard();
             $card = $cardModel->find($uid);
             if ($card) {
+                $solde = (float)$card['solde'];
+                $maxVolumeLitres = ($price > 0) ? floor(($solde / $price) * 100) / 100 : 0.00;
+
                 $rfidData = [
                     'msg_id'             => (int)$lastRfidMsg['id'],
+                    'valid'              => true,
                     'uid'                => $card['uid'],
                     'farmer_nom'         => $card['farmer_nom'],
                     'farmer_prenom'      => $card['farmer_prenom'],
-                    'solde'              => (float)$card['solde'],
+                    'solde'              => $solde,
                     'has_pin'            => !empty($card['code_pin']),
-                    'max_volume_litres'  => (float)($borne['max_volume_litres'] ?? 500.0),
+                    'max_volume_litres'  => $maxVolumeLitres,
+                    'created_at'         => $lastRfidMsg['created_at']
+                ];
+            } else {
+                $rfidData = [
+                    'msg_id'             => (int)$lastRfidMsg['id'],
+                    'valid'              => false,
+                    'uid'                => $uid,
+                    'error'              => 'Carte non reconnue ou non enregistrée.',
                     'created_at'         => $lastRfidMsg['created_at']
                 ];
             }
@@ -637,18 +687,23 @@ class ApiController extends BaseController {
         $stmt->execute(['topic' => "water/station{$borneId}/volume"]);
         $lastVolume = (float)($stmt->fetchColumn() ?: 0.0);
 
-        // 5. Récupérer le tarif de l'eau
-        $stmt = $db->query("SELECT param_value FROM configurations WHERE param_key = 'price_per_litre'");
-        $price = $stmt->fetchColumn();
-        $price = ($price !== false) ? (float)$price : 0.200;
+        // 5. Récupérer l'état de distribution précis (distributing, completed, interrupted, idle)
+        $stmt = $db->prepare(
+            "SELECT payload FROM mqtt_messages 
+             WHERE topic = :topic AND direction = 'in' 
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(['topic' => "water/station{$borneId}/state"]);
+        $lastDistState = $stmt->fetchColumn() ?: (($lastPumpState === 'ON') ? 'distributing' : 'idle');
 
         $this->jsonResponse([
             'status'             => 'success',
             'is_online'          => ($borne['statut_connexion'] === 'en ligne'),
-            'valve_status'       => $borne['etat_vanne'] ?: 'fermee',
+            'valve_status'       => ($borne['etat_vanne'] === 'ouverte' || $lastPumpState === 'ON') ? 'ouverte' : 'fermee',
             'flow_rate'          => (float)($borne['debit_instantane'] ?: 0.0),
             'pump_state'         => $lastPumpState,
             'volume_distributed' => $lastVolume,
+            'distribution_state' => $lastDistState,
             'price_per_litre'    => $price,
             'last_rfid'          => $rfidData
         ]);
@@ -674,6 +729,16 @@ class ApiController extends BaseController {
             $this->jsonResponse(['status' => 'error', 'message' => 'Erreur enregistrement annulation.'], 500);
         }
 
+        // Réinitialiser la pompe à OFF dans mqtt_messages
+        $db = \App\Core\Database::getInstance()->getConnection();
+        try {
+            $stmtPump = $db->prepare(
+                "INSERT INTO mqtt_messages (topic, payload, direction, created_at) 
+                 VALUES (:topic, 'OFF', 'in', NOW())"
+            );
+            $stmtPump->execute(['topic' => "water/station{$borneId}/pump"]);
+        } catch (\Throwable $e) {}
+
         $this->jsonResponse(['status' => 'success', 'message' => 'Annulation enregistrée.']);
     }
 
@@ -685,10 +750,6 @@ class ApiController extends BaseController {
      * Endpoint : POST index.php?route=api/bornes/kiosk-start
      */
     public function kioskStart() {
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            $this->jsonResponse(['status' => 'error', 'message' => 'Méthode non autorisée. Utilisez POST.'], 405);
-        }
-
         $params = $this->getRequestParams();
         $borneId = (int)($params['borne_id'] ?? 1);
         $uid = strtoupper(trim($params['uid'] ?? ''));
@@ -710,10 +771,116 @@ class ApiController extends BaseController {
             $this->jsonResponse(['status' => 'error', 'message' => 'Erreur lors de l\'enregistrement de la commande de volume.'], 500);
         }
 
+        // Notifier le Kiosque que la pompe est en cours de démarrage
+        $db = \App\Core\Database::getInstance()->getConnection();
+        try {
+            $stmtPump = $db->prepare(
+                "INSERT INTO mqtt_messages (topic, payload, direction, created_at) 
+                 VALUES (:topic, 'ON', 'in', NOW())"
+            );
+            $stmtPump->execute(['topic' => "water/station{$borneId}/pump"]);
+        } catch (\Throwable $e) {}
+
         $this->jsonResponse([
             'status' => 'success',
             'message' => 'Commande de distribution enregistrée avec succès.',
             'commande_id' => $commandeId
+        ]);
+    }
+
+    /**
+     * Retourne les commandes en attente pour l'ESP32 via HTTP (secours si MQTT n'est pas utilisé)
+     * Endpoint : GET index.php?route=api/bornes/pending-commands&borne_id=1
+     */
+    public function pendingCommands() {
+        $borneId = (int)($_GET['borne_id'] ?? 1);
+        $db = \App\Core\Database::getInstance()->getConnection();
+
+        $stmt = $db->prepare(
+            "SELECT id, type_commande 
+             FROM commandes_bornes 
+             WHERE borne_id = :borne_id AND statut = 'en_attente' 
+             ORDER BY id ASC LIMIT 1"
+        );
+        $stmt->execute(['borne_id' => $borneId]);
+        $cmd = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if ($cmd) {
+            $stmtUpdate = $db->prepare("UPDATE commandes_bornes SET statut = 'ack', date_ack = NOW() WHERE id = :id");
+            $stmtUpdate->execute(['id' => $cmd['id']]);
+
+            $this->jsonResponse([
+                'status'      => 'success',
+                'has_command' => true,
+                'command_id'  => (int)$cmd['id'],
+                'type'        => $cmd['type_commande']
+            ]);
+        }
+
+        $this->jsonResponse([
+            'status'      => 'success',
+            'has_command' => false
+        ]);
+    }
+
+    /**
+     * Reçoit la télémétrie en direct de l'ESP32 (débit instantané, volume distribué, état pompe, état électrovanne, état distribution)
+     * Endpoint : POST index.php?route=api/bornes/telemetry
+     */
+    public function telemetry() {
+        $params = $this->getRequestParams();
+        $borneId = (int)($params['borne_id'] ?? 1);
+        $pumpState = strtoupper(trim($params['pump_state'] ?? 'OFF'));
+        $valveState = (strtoupper(trim($params['valve_state'] ?? '')) === 'OPEN' || $pumpState === 'ON') ? 'ouverte' : 'fermee';
+        $volumeDistributed = (float)($params['volume_distributed'] ?? 0.0);
+        $volumeRequested = (float)($params['volume_requested'] ?? 0.0);
+        $flowRate = (float)($params['flow_rate'] ?? 0.0);
+        $distState = trim($params['distribution_state'] ?? '');
+        if (empty($distState)) {
+            $distState = ($pumpState === 'ON') ? 'distributing' : 'idle';
+        }
+
+        $db = \App\Core\Database::getInstance()->getConnection();
+
+        // 1. Mettre à jour l'état de la borne dans la DB
+        try {
+            $stmt = $db->prepare(
+                "UPDATE bornes 
+                 SET dernier_ping = NOW(), 
+                     statut_connexion = 'en ligne', 
+                     etat_vanne = :etat_vanne, 
+                     debit_instantane = :debit 
+                 WHERE id = :id"
+            );
+            $stmt->execute([
+                'etat_vanne' => $valveState,
+                'debit'      => $flowRate,
+                'id'         => $borneId
+            ]);
+        } catch (\Throwable $e) {}
+
+        // 2. Mettre à jour mqtt_messages pour la synchronisation temps réel avec le Kiosque
+        try {
+            $stmtPump = $db->prepare("INSERT INTO mqtt_messages (topic, payload, direction, created_at) VALUES (:t, :p, 'in', NOW())");
+            $stmtPump->execute(['t' => "water/station{$borneId}/pump", 'p' => $pumpState]);
+
+            $stmtVol = $db->prepare("INSERT INTO mqtt_messages (topic, payload, direction, created_at) VALUES (:t, :p, 'in', NOW())");
+            $stmtVol->execute(['t' => "water/station{$borneId}/volume", 'p' => number_format($volumeDistributed, 3, '.', '')]);
+
+            $stmtFlow = $db->prepare("INSERT INTO mqtt_messages (topic, payload, direction, created_at) VALUES (:t, :p, 'in', NOW())");
+            $stmtFlow->execute(['t' => "water/station{$borneId}/flow", 'p' => number_format($flowRate, 2, '.', '')]);
+
+            $stmtState = $db->prepare("INSERT INTO mqtt_messages (topic, payload, direction, created_at) VALUES (:t, :p, 'in', NOW())");
+            $stmtState->execute(['t' => "water/station{$borneId}/state", 'p' => $distState]);
+        } catch (\Throwable $e) {}
+
+        $this->jsonResponse([
+            'status'             => 'success',
+            'borne_id'           => $borneId,
+            'pump_state'         => $pumpState,
+            'valve_state'        => $valveState,
+            'distribution_state' => $distState,
+            'volume_distributed' => $volumeDistributed
         ]);
     }
 }

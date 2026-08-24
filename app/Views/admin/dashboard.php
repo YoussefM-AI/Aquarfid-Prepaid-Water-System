@@ -335,7 +335,7 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                                                         <?php else: ?>
                                                             <a href="index.php?route=cards/status&uid=<?= $c['uid'] ?>&status=active" class="p-1.5 bg-white border border-slate-200 hover:bg-emerald-50 text-emerald-600 hover:border-emerald-300 rounded-lg transition-all" title="Activer"><i data-lucide="check" class="w-3.5 h-3.5"></i></a>
                                                         <?php endif; ?>
-                                                        <button onclick="openEditClientModal(<?= $c['agriculteur_id'] ?>, '<?= addslashes(htmlspecialchars($c['farmer_nom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_prenom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_telephone'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_email'] ?? '')) ?>', '<?= htmlspecialchars($c['farmer_statut'] ?? '') ?>', '<?= (!empty($c['code_pin']) && strlen($c['code_pin']) === 4) ? htmlspecialchars($c['code_pin']) : '' ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
+                                                        <button onclick="openEditClientModal(<?= $c['agriculteur_id'] ?>, '<?= addslashes(htmlspecialchars($c['farmer_nom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_prenom'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_telephone'])) ?>', '<?= addslashes(htmlspecialchars($c['farmer_email'] ?? '')) ?>', '<?= htmlspecialchars($c['farmer_statut'] ?? '') ?>', '<?= (!empty($c['code_pin']) && strlen($c['code_pin']) === 4) ? htmlspecialchars($c['code_pin']) : '' ?>', '<?= addslashes(htmlspecialchars($c['uid'])) ?>')" class="p-1.5 bg-white border border-slate-200 hover:bg-blue-50 text-blue-600 hover:border-blue-300 rounded-lg transition-all" title="Modifier"><i data-lucide="edit-3" class="w-3.5 h-3.5"></i></button>
                                                         <a href="index.php?route=farmers/delete&id=<?= $c['agriculteur_id'] ?>" onclick="return confirm('Supprimer cet agriculteur ?')" class="p-1.5 bg-white border border-slate-200 hover:bg-red-50 text-red-600 hover:border-red-300 rounded-lg transition-all" title="Supprimer"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></a>
                                                     <?php endif; ?>
                                                 </div>
@@ -574,17 +574,25 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                 <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Email</label>
                 <input type="email" name="email" id="edit-client-email" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 focus:bg-white focus:border-blue-500 rounded-lg text-slate-800 text-sm outline-none">
             </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div>
-                    <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Statut</label>
-                    <select name="statut" id="edit-client-status" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 focus:bg-white focus:border-blue-500 rounded-lg text-slate-800 text-sm outline-none">
-                        <option value="actif">Actif</option>
-                        <option value="suspendu">Suspendu</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Nouveau PIN</label>
-                    <input type="text" name="code_pin" id="edit-client-pin" maxlength="4" placeholder="(Inchangé si vide)" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 focus:bg-white focus:border-blue-500 rounded-lg text-slate-800 text-sm font-mono outline-none">
+            <div>
+                <label class="block text-[10px] font-bold uppercase text-slate-500 mb-1">Statut</label>
+                <select name="statut" id="edit-client-status" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 focus:bg-white focus:border-blue-500 rounded-lg text-slate-800 text-sm outline-none">
+                    <option value="actif">Actif</option>
+                    <option value="suspendu">Suspendu</option>
+                </select>
+            </div>
+            
+            <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 mt-2">
+                <h4 class="text-[10px] font-bold text-slate-800 uppercase tracking-wider mb-3 flex items-center gap-1.5"><i data-lucide="credit-card" class="w-3.5 h-3.5"></i> Carte RFID</h4>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-[9px] font-bold uppercase text-slate-500 mb-1">UID Carte (ID)</label>
+                        <input type="text" name="uid" id="edit-client-uid" required placeholder="Ex: 04A32B..." class="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded text-slate-800 text-xs font-mono focus:border-blue-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-[9px] font-bold uppercase text-slate-500 mb-1">Nouveau PIN (4 chiffres)</label>
+                        <input type="text" name="code_pin" id="edit-client-pin" maxlength="4" placeholder="(Inchangé si vide)" class="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded text-slate-800 text-xs font-mono focus:border-blue-500 outline-none">
+                    </div>
                 </div>
             </div>
             <div class="flex gap-2 pt-4 shrink-0">
@@ -737,13 +745,20 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
     }
     function closeClientModal() { document.getElementById('client-modal').classList.add('hidden'); }
 
-    function openEditClientModal(id, nom, prenom, telephone, email, status, pin = '') {
+    function openEditClientModal(id, nom, prenom, telephone, email, status, pin = '', uid = '') {
         document.getElementById('edit-client-id').value = id;
         document.getElementById('edit-client-prenom').value = prenom;
         document.getElementById('edit-client-nom').value = nom;
         document.getElementById('edit-client-phone').value = telephone;
         document.getElementById('edit-client-email').value = email;
         document.getElementById('edit-client-status').value = status;
+        
+        const uidInput = document.getElementById('edit-client-uid');
+        if (uidInput) {
+            uidInput.value = uid;
+            uidInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
+        }
+
         const pinInput = document.getElementById('edit-client-pin');
         if (pinInput) {
             pinInput.value = pin;
@@ -752,6 +767,7 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
         const alertEl = document.getElementById('edit-client-modal-alert');
         if (alertEl) { alertEl.classList.add('hidden'); alertEl.innerHTML = ''; }
         document.getElementById('edit-client-modal').classList.remove('hidden');
+        if (window.lucide) { try { lucide.createIcons(); } catch(err){} }
     }
     function closeEditClientModal() { document.getElementById('edit-client-modal').classList.add('hidden'); }
 
@@ -759,6 +775,7 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
         e.preventDefault();
         const alertEl = document.getElementById(type === 'create' ? 'client-modal-alert' : 'edit-client-modal-alert');
         const pinInput = document.getElementById(type === 'create' ? 'client-pin' : 'edit-client-pin');
+        const uidInput = document.getElementById(type === 'create' ? 'client-uid' : 'edit-client-uid');
         
         if (alertEl) {
             alertEl.classList.add('hidden');
@@ -766,6 +783,9 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
         }
         if (pinInput) {
             pinInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
+        }
+        if (uidInput) {
+            uidInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
         }
 
         const formData = new FormData(formEl);
@@ -800,6 +820,9 @@ $canRecharge = $isAdmin || (isset($currentAdmin) && (bool)$currentAdmin['perm_ca
                 if (pinInput && data.message && data.message.toLowerCase().includes('pin')) {
                     pinInput.focus();
                     pinInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
+                } else if (uidInput && data.message && (data.message.toLowerCase().includes('uid') || data.message.toLowerCase().includes('carte'))) {
+                    uidInput.focus();
+                    uidInput.classList.add('border-red-500', 'ring-1', 'ring-red-500');
                 }
             }
         })

@@ -154,7 +154,13 @@ class CardController extends BaseController {
 
         $success = $this->cardModel->updateStatus($uid, $status);
         if ($success) {
-            Session::setFlash('success', "Le statut de la carte {$uid} a été mis à jour.");
+            // Synchroniser le statut de l'agriculteur
+            $farmerStatut = ($status === 'active') ? 'actif' : 'suspendu';
+            $db = \App\Core\Database::getInstance()->getConnection();
+            $stmt = $db->prepare("UPDATE agriculteurs a JOIN cartes_rfid c ON c.agriculteur_id = a.id SET a.statut = :farmer_statut WHERE c.uid = :uid");
+            $stmt->execute(['farmer_statut' => $farmerStatut, 'uid' => $uid]);
+
+            Session::setFlash('success', "Le statut de la carte {$uid} et du client a été mis à jour ({$status}).");
         } else {
             Session::setFlash('error', "Échec de la mise à jour du statut de la carte.");
         }

@@ -55,14 +55,25 @@
                 </div>
             </div>
 
-            <!-- Statut -->
-            <div>
-                <label for="statut" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Statut du compte</label>
-                <select name="statut" id="statut"
-                        class="block w-full px-4 py-3 bg-slate-900/60 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-100 text-sm rounded-xl transition-all duration-300 outline-none">
-                    <option value="actif" <?= ($farmer['statut'] ?? '') === 'actif' ? 'selected' : '' ?>>Actif (Autorisé à distribuer)</option>
-                    <option value="suspendu" <?= ($farmer['statut'] ?? '') === 'suspendu' ? 'selected' : '' ?>>Suspendu (Bloqué temporairement)</option>
-                </select>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <!-- Statut -->
+                <div>
+                    <label for="statut" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Statut du compte</label>
+                    <select name="statut" id="statut"
+                            class="block w-full px-4 py-3 bg-slate-900/60 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-100 text-sm rounded-xl transition-all duration-300 outline-none">
+                        <option value="actif" <?= ($farmer['statut'] ?? '') === 'actif' ? 'selected' : '' ?>>Actif (Autorisé à distribuer)</option>
+                        <option value="suspendu" <?= ($farmer['statut'] ?? '') === 'suspendu' ? 'selected' : '' ?>>Suspendu (Bloqué temporairement)</option>
+                    </select>
+                </div>
+
+                <!-- UID Carte RFID -->
+                <div>
+                    <label for="uid" class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">UID Carte RFID *</label>
+                    <input type="text" name="uid" id="uid" required
+                           value="<?= htmlspecialchars($farmer['uid'] ?? '') ?>"
+                           placeholder="ex: 04A32B125C6D80"
+                           class="block w-full px-4 py-3 bg-slate-900/60 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-slate-100 font-mono text-sm rounded-xl transition-all duration-300 outline-none">
+                </div>
             </div>
 
             <!-- Boutons -->

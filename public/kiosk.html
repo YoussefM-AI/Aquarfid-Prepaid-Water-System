@@ -1223,18 +1223,41 @@
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
       </div>
-      <h2 class="success-title">Distribution Lancée !</h2>
-      <p class="success-text">L'eau est en cours de distribution. Veuillez patienter.</p>
+      <h2 class="success-title">Distribution en cours...</h2>
+      <p class="success-text">La borne délivre de l'eau actuellement. Suivez le compteur ci-dessous.</p>
       
-      <div class="success-refill-stats">
+      <!-- Badges d'état matériel en direct (Pompe & Électrovanne synchronisées) -->
+      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 15px; flex-wrap: wrap;">
+        <span id="live-pump-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 0.8rem; font-weight: 800; background: #E6F4EA; color: #137333; border: 1px solid #CEEAD6;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #1E8E3E; animation: ping 1.5s infinite;"></span>
+          POMPE : <strong id="live-pump-text">ON</strong>
+        </span>
+        <span id="live-valve-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 0.8rem; font-weight: 800; background: #E6F4EA; color: #137333; border: 1px solid #CEEAD6;">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: #1E8E3E;"></span>
+          ÉLECTROVANNE : <strong id="live-valve-text">OUVERTE</strong>
+        </span>
+        <span id="live-flow-badge" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 0.8rem; font-weight: 800; background: #E8F0FE; color: #1A73E8; border: 1px solid #D2E3FC;">
+          💧 DÉBIT : <strong id="live-flow-text">0.0 L/min</strong>
+        </span>
+      </div>
+
+      <!-- 4 Boîtes Métriques Synchronisées -->
+      <div class="success-refill-stats" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; padding: 15px 20px; max-width: 540px; width: 100%;">
         <div>
-          <div class="stat-box-label">Volume Délivré</div>
-          <div class="stat-box-value" id="success-liters">0 / 250 mL</div>
+          <div class="stat-box-label">Demandé</div>
+          <div class="stat-box-value" id="success-requested" style="color: var(--kiosk-text);">250 mL</div>
         </div>
-        <div style="border-left: 1px solid rgba(255,255,255,0.1); height: 40px; align-self: center;"></div>
-        <div>
-          <div class="stat-box-label">Coût débité</div>
-          <div class="stat-box-value" id="success-cost">0.000 DT</div>
+        <div style="border-left: 1px solid var(--kiosk-card-border); padding-left: 10px;">
+          <div class="stat-box-label">Délivré</div>
+          <div class="stat-box-value" id="success-liters" style="color: var(--accent-cyan);">0 mL</div>
+        </div>
+        <div style="border-left: 1px solid var(--kiosk-card-border); padding-left: 10px;">
+          <div class="stat-box-label">Restant</div>
+          <div class="stat-box-value" id="success-remaining" style="color: var(--warning-amber);">250 mL</div>
+        </div>
+        <div style="border-left: 1px solid var(--kiosk-card-border); padding-left: 10px;">
+          <div class="stat-box-label">Coût</div>
+          <div class="stat-box-value" id="success-cost" style="color: var(--success-green);">0.000 DT</div>
         </div>
       </div>
 
@@ -1249,8 +1272,8 @@
         </div>
       </div>
 
-      <div class="success-countdown">
-        <span>Retour à l'accueil dans <strong id="countdown-text">3</strong> secondes...</span>
+      <div class="success-countdown" style="display: none;">
+        <span>Finalisation...</span>
       </div>
     </div>
 
@@ -1315,7 +1338,7 @@
             <svg style="width:16px;height:16px;fill:currentColor;" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>
             Imprimer
           </button>
-          <button class="receipt-close-btn" onclick="closeReceiptModal()">Fermer</button>
+          <button class="receipt-close-btn" id="receipt-close-btn" onclick="closeReceiptModal()">Fermer (4s)</button>
         </div>
       </div>
     </div>
@@ -1428,6 +1451,21 @@
     function sendKioskCancel() {
       fetch('index.php?route=api/bornes/kiosk-cancel&borne_id=1', { method: 'POST' })
         .catch(err => console.error("Erreur d'envoi de la commande d'annulation:", err));
+    }
+
+    function emergencyStopKiosk() {
+      sendKioskCancel();
+      const btn = document.getElementById("btn-stop-distribution");
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Arrêt en cours...";
+      }
+      setTimeout(() => {
+        document.getElementById("kiosk-success-overlay").classList.remove("active");
+        showKioskStep(1);
+        activeCard = null;
+        lastPumpState = 'OFF';
+      }, 1000);
     }
 
     function pinCancel() {
@@ -1702,10 +1740,11 @@
     let lastProcessedRfidMsgId = null;
     let lastPumpState = null;
 
-    // Returns true only when the kiosk is on the idle scan screen
+    // Returns true when the kiosk is ready for a new card scan
     function isOnIdleScreen() {
-      return document.getElementById('kiosk-step-1').classList.contains('active') &&
-             !document.getElementById('kiosk-success-overlay').classList.contains('active');
+      const isOverlayActive = document.getElementById('kiosk-success-overlay').classList.contains('active');
+      const isReceiptActive = document.getElementById('receipt-modal').classList.contains('active');
+      return (document.getElementById('kiosk-step-1').classList.contains('active') && !isOverlayActive && !isReceiptActive) || isReceiptActive;
     }
 
     function startKioskPolling() {
@@ -1716,15 +1755,31 @@
             if (data.status !== 'success') return;
 
             // 1. Détection automatique du scan de carte physique (MQTT)
-            //    Only process a new RFID scan when idle on the scan screen
+            //    Only process a new RFID scan when idle on the scan screen or receipt open
             if (data.last_rfid) {
               const rfid = data.last_rfid;
               
               if (lastProcessedRfidMsgId === null) {
-                // Initialisation au premier chargement pour ne pas réagir sur un vieux scan
                 lastProcessedRfidMsgId = rfid.msg_id;
               } else if (rfid.msg_id > lastProcessedRfidMsgId && isOnIdleScreen() && !isScanningInProgress) {
                 lastProcessedRfidMsgId = rfid.msg_id;
+                
+                // Si le reçu était encore affiché, le fermer immédiatement pour le nouveau client
+                const receiptModal = document.getElementById("receipt-modal");
+                if (receiptModal && receiptModal.classList.contains("active")) {
+                  closeReceiptModal();
+                }
+
+                if (rfid.valid === false) {
+                  const toast = document.getElementById("scan-error-toast");
+                  if (toast) {
+                    toast.textContent = `❌ Carte ${rfid.uid} introuvable ou inactive.`;
+                    toast.style.display = "block";
+                    setTimeout(() => { toast.style.display = "none"; }, 4000);
+                  }
+                  return;
+                }
+
                 isScanningInProgress = true;
                 
                 // Déclencher l'effet visuel de scan sur le kiosque
@@ -1745,7 +1800,7 @@
                 maxAffordableLiters = rfid.max_volume_litres;
                 applyClientTheme(rfid.uid);
 
-                // Navigate immediately after the flash (400ms)
+                // Naviguer immédiatement après l'effet visuel
                 setTimeout(() => {
                   isScanningInProgress = false;
                   if (rfid.has_pin) {
@@ -1757,35 +1812,71 @@
                     setupWaterSelectionForSolde();
                     showKioskStep(2);
                   }
-                }, 420); // slightly after flash removes
+                }, 420);
               }
             }
 
-            // 2. Synchronisation de la distribution d'eau réelle (physical pump via MQTT)
+            // 2. Synchronisation de la distribution d'eau réelle (physical pump & valve via MQTT/HTTP)
             const currentPumpState = data.pump_state;
+            const currentDistState = data.distribution_state || (currentPumpState === 'ON' ? 'distributing' : 'idle');
+            const isPumpOn = (currentPumpState === 'ON');
+            const isValveOpen = (data.valve_status === 'ouverte' || isPumpOn);
             
+            // Mise à jour des badges d'état matériel (Pompe, Électrovanne, Débit)
+            const pumpBadge = document.getElementById("live-pump-badge");
+            const pumpText = document.getElementById("live-pump-text");
+            if (pumpBadge && pumpText) {
+              pumpText.textContent = isPumpOn ? "ON" : "OFF";
+              pumpBadge.style.background = isPumpOn ? "#E6F4EA" : "#F1F3F4";
+              pumpBadge.style.color = isPumpOn ? "#137333" : "#5F6368";
+              pumpBadge.style.borderColor = isPumpOn ? "#CEEAD6" : "#DADCE0";
+            }
+
+            const valveBadge = document.getElementById("live-valve-badge");
+            const valveText = document.getElementById("live-valve-text");
+            if (valveBadge && valveText) {
+              valveText.textContent = isValveOpen ? "OUVERTE" : "FERMÉE";
+              valveBadge.style.background = isValveOpen ? "#E6F4EA" : "#F1F3F4";
+              valveBadge.style.color = isValveOpen ? "#137333" : "#5F6368";
+              valveBadge.style.borderColor = isValveOpen ? "#CEEAD6" : "#DADCE0";
+            }
+
+            const flowText = document.getElementById("live-flow-text");
+            if (flowText) {
+              flowText.textContent = (data.flow_rate !== null && data.flow_rate !== undefined) ? `${parseFloat(data.flow_rate).toFixed(1)} L/min` : "0.0 L/min";
+            }
+
             if (lastPumpState === null) {
-              // Absorption de l'état initial sans déclenchement d'overlay au chargement de la page
+              // Absorption de l'état initial au chargement de la page
               lastPumpState = currentPumpState;
             }
-            else if (currentPumpState === 'ON' && (lastPumpState === 'OFF' || activeCard !== null)) {
-              // Si la pompe tourne physiquement, on bascule l'overlay de distribution
+            else if (isPumpOn && activeCard !== null && !isOnIdleScreen() && !document.getElementById("kiosk-step-pin").classList.contains("active")) {
+              // Si la pompe tourne physiquement : affichage de l'overlay temps réel
               const overlay = document.getElementById("kiosk-success-overlay");
               overlay.classList.add("active");
               
-              // Adapter le texte de chargement
               const successTitle = document.querySelector(".success-title");
               if (successTitle) successTitle.textContent = "Distribution en cours...";
               
               const successText = document.querySelector(".success-text");
-              if (successText) successText.textContent = "La borne délivre de l'eau actuellement. Suivez le compteur ci-dessous.";
+              if (successText) successText.textContent = "La pompe tourne et l'électrovanne est ouverte. Le débitmètre mesure l'eau en direct.";
 
-              // Volume en temps réel (en mL)
-              const distributedMl = Math.round(data.volume_distributed * 1000.0);
+              // Volumes en temps réel (en mL)
               const requestedMl = selectedLiters || 250;
+              const rawDistributedMl = Math.round(data.volume_distributed * 1000.0);
+              const distributedMl = Math.min(requestedMl, rawDistributedMl);
+              const remainingMl = Math.max(0, requestedMl - distributedMl);
               const percent = Math.min(100, Math.round((distributedMl / requestedMl) * 100));
 
-              document.getElementById("success-liters").textContent = `${distributedMl} / ${requestedMl} mL`;
+              const reqEl = document.getElementById("success-requested");
+              if (reqEl) reqEl.textContent = `${requestedMl} mL`;
+
+              const litersEl = document.getElementById("success-liters");
+              if (litersEl) litersEl.textContent = `${distributedMl} mL`;
+
+              const remainEl = document.getElementById("success-remaining");
+              if (remainEl) remainEl.textContent = `${remainingMl} mL`;
+
               const fillEl = document.getElementById("live-progress-fill");
               if (fillEl) fillEl.style.width = `${percent}%`;
               const percentEl = document.getElementById("live-progress-percent");
@@ -1795,38 +1886,52 @@
               const countdown = document.querySelector(".success-countdown");
               if (countdown) countdown.style.display = "none";
 
-              // Calcul du coût réel
-              const cost = data.volume_distributed * data.price_per_litre;
+              // Calcul du coût réel en temps réel
+              const cost = (distributedMl / 1000.0) * data.price_per_litre;
               document.getElementById("success-cost").textContent = `${cost.toFixed(3)} DT`;
             } 
-            else if (currentPumpState === 'OFF' && lastPumpState === 'ON') {
-              // Transition ON -> OFF : La pompe vient de s'arrêter
-              // Only trigger if the overlay is actually showing (avoids phantom reset on page load)
+            else if (!isPumpOn && lastPumpState === 'ON') {
+              // Transition ON -> OFF : Arrêt confirmé par l'ESP32
               const overlay = document.getElementById("kiosk-success-overlay");
               if (!overlay.classList.contains('active')) {
                 lastPumpState = currentPumpState;
                 return;
               }
 
-              // Update to final volume, percent, and cost values on completion
-              const distributedMl = Math.round(data.volume_distributed * 1000.0);
+              // Volume final réel certifié par le débitmètre de l'ESP32
               const requestedMl = selectedLiters || 250;
-              const percent = Math.min(100, Math.round((distributedMl / requestedMl) * 100));
+              const rawDistributedMl = Math.round(data.volume_distributed * 1000.0);
+              const isCompletedFull = (currentDistState === 'completed' || rawDistributedMl >= requestedMl * 0.92);
+              const distributedMl = isCompletedFull ? requestedMl : rawDistributedMl;
+              const remainingMl = Math.max(0, requestedMl - distributedMl);
+              const percent = isCompletedFull ? 100 : Math.min(100, Math.round((distributedMl / requestedMl) * 100));
 
-              document.getElementById("success-liters").textContent = `${distributedMl} / ${requestedMl} mL`;
+              const reqEl = document.getElementById("success-requested");
+              if (reqEl) reqEl.textContent = `${requestedMl} mL`;
+
+              const litersEl = document.getElementById("success-liters");
+              if (litersEl) litersEl.textContent = `${distributedMl} mL`;
+
+              const remainEl = document.getElementById("success-remaining");
+              if (remainEl) remainEl.textContent = `${remainingMl} mL`;
+
               const fillEl = document.getElementById("live-progress-fill");
               if (fillEl) fillEl.style.width = `${percent}%`;
               const percentEl = document.getElementById("live-progress-percent");
               if (percentEl) percentEl.textContent = `${percent}%`;
 
-              const cost = data.volume_distributed * data.price_per_litre;
+              const cost = (distributedMl / 1000.0) * data.price_per_litre;
               document.getElementById("success-cost").textContent = `${cost.toFixed(3)} DT`;
 
               const successTitle = document.querySelector(".success-title");
-              if (successTitle) successTitle.textContent = "Distribution Terminée !";
-              
               const successText = document.querySelector(".success-text");
-              if (successText) successText.textContent = "Merci pour votre visite. Votre solde a été mis à jour.";
+              if (isCompletedFull) {
+                if (successTitle) successTitle.textContent = "Distribution terminée avec succès !";
+                if (successText) successText.textContent = "La pompe et l'électrovanne ont été arrêtées dès le volume cible atteint.";
+              } else {
+                if (successTitle) successTitle.textContent = "Distribution Interrompue";
+                if (successText) successText.textContent = `Seul le volume réel délivré (${distributedMl} mL sur ${requestedMl} mL) est débité de votre solde.`;
+              }
 
               // Populate receipt ticket data
               const now = new Date();
@@ -1861,11 +1966,15 @@
                   const receiptModal = document.getElementById("receipt-modal");
                   if (receiptModal) receiptModal.classList.add("active");
                   
-                  // Start a 15-second automatic close interval for safety
-                  let receiptRemaining = 15;
+                  // Décompte de 4 secondes pour fermer le reçu et revenir à l'écran de scan
+                  let receiptRemaining = 4;
+                  const closeBtn = document.getElementById("receipt-close-btn");
+                  if (closeBtn) closeBtn.textContent = `Fermer (${receiptRemaining}s)`;
+                  
                   if (receiptInterval) clearInterval(receiptInterval);
                   receiptInterval = setInterval(() => {
                     receiptRemaining -= 1;
+                    if (closeBtn) closeBtn.textContent = `Fermer (${receiptRemaining}s)`;
                     if (receiptRemaining <= 0) {
                       clearInterval(receiptInterval);
                       closeReceiptModal();
@@ -1890,10 +1999,8 @@
         clearInterval(receiptInterval);
         receiptInterval = null;
       }
-      const receiptModal = document.getElementById("receipt-modal");
-      if (receiptModal) receiptModal.classList.remove("active");
-      activeCard = null;
-      showKioskStep(1);
+      // Recharger complètement la page du kiosque pour la prochaine carte
+      window.location.reload();
     }
   </script>
 </body>

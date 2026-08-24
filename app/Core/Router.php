@@ -61,6 +61,8 @@ class Router {
             'api/bornes/kiosk-status' => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskStatus'],
             'api/bornes/kiosk-cancel' => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskCancel'],
             'api/bornes/kiosk-start'  => ['controller' => 'App\Controllers\ApiController', 'method' => 'kioskStart'],
+            'api/bornes/pending-commands' => ['controller' => 'App\Controllers\ApiController', 'method' => 'pendingCommands'],
+            'api/bornes/telemetry'    => ['controller' => 'App\Controllers\ApiController', 'method' => 'telemetry'],
 
             // Gestion des alertes (dashboard admin)
             'alertes/resolve'         => ['controller' => 'App\Controllers\DashboardController', 'method' => 'resolveAlerte'],
