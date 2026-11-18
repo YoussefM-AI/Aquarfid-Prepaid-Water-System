@@ -45,11 +45,12 @@ use App\Models\DeviceStatus;
 use App\Models\PumpLog;
 
 // ── Configuration MQTT ────────────────────────────────────────────────────────
-define('MQTT_HOST',      '127.0.0.1');  // Broker Mosquitto local (Laragon)
-define('MQTT_PORT',      1883);
+// TODO: Set MQTT_USERNAME and MQTT_PASSWORD as environment variables or update here
+define('MQTT_HOST',      getenv('MQTT_HOST')      ?: '127.0.0.1');  // Broker Mosquitto
+define('MQTT_PORT',      (int)(getenv('MQTT_PORT') ?: 1883));
 define('MQTT_CLIENT_ID', 'php_water_worker_' . gethostname() . '_' . uniqid());
-define('MQTT_USERNAME',  'water_user');
-define('MQTT_PASSWORD',  'water_pass123');
+define('MQTT_USERNAME',  getenv('MQTT_USERNAME')  ?: 'water_user');
+define('MQTT_PASSWORD',  getenv('MQTT_PASSWORD')  ?: 'change_me_in_env');
 define('MQTT_KEEPALIVE', 60);           // Secondes
 
 // ── Topics ────────────────────────────────────────────────────────────────────

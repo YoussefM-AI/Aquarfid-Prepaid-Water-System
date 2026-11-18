@@ -113,8 +113,8 @@ INSERT INTO `cartes_rfid` (`uid`, `agriculteur_id`, `solde`, `statut`) VALUES
 ON DUPLICATE KEY UPDATE `uid` = `uid`;
 
 INSERT INTO `bornes` (`id`, `nom`, `localisation`, `statut_connexion`, `api_key`, `dernier_ping`) VALUES
-(1, 'Borne Secteur Nord (Cuve principale)', 'Zone Agricole Nord - Secteur A', 'en ligne', 'borne1_secret_9a8b7c6d', NOW()),
-(2, 'Borne Secteur Sud', 'Plaine du Sud - Secteur C', 'hors ligne', 'borne2_secret_1e2f3g4h', DATE_SUB(NOW(), INTERVAL 2 HOUR))
+(1, 'Borne Secteur Nord (Cuve principale)', 'Zone Agricole Nord - Secteur A', 'en ligne', 'CHANGE_ME_BORNE1_API_KEY', NOW()),
+(2, 'Borne Secteur Sud', 'Plaine du Sud - Secteur C', 'hors ligne', 'CHANGE_ME_BORNE2_API_KEY', DATE_SUB(NOW(), INTERVAL 2 HOUR))
 ON DUPLICATE KEY UPDATE `id` = `id`;
 
 INSERT INTO `transactions` (`carte_rfid_uid`, `borne_id`, `volume_demande`, `volume_distribue`, `montant_debite`, `date_heure`, `statut`) VALUES

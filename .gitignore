@@ -1,0 +1,54 @@
+# ============================================================
+# .gitignore — RFID Water Distribution System
+# ============================================================
+
+# --- Credentials & Sensitive Config ---
+config/config.php
+config/database.php
+*.env
+.env
+
+# --- Vendor (Composer) ---
+/vendor/
+
+# --- Logs ---
+*.log
+workers/*.log
+workers/*.log.*.old
+
+# --- Scratch / Debug files ---
+/scratch/
+public/debug.php
+public/test_*.php
+public/check_sync.php
+public/fix_mismatches.php
+public/get_ip.php
+public/my_ip.php
+public/test_insert.php
+
+# --- One-off migration/fix scripts at root ---
+add_pin_migration.php
+fix_admin_password.php
+init_db.php
+query
+
+# --- Dot-folders used locally ---
+/.md/
+
+# --- PHP cache ---
+*.cache
+.php_cs.cache
+.phpunit.cache/
+.phpunit.result.cache
+
+# --- OS / IDE ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Node / Tailwind build (if applicable) ---
+node_modules/

@@ -23,11 +23,13 @@
 // ============================================================
 
 // --- WiFi ---
-const char *WIFI_SSID = "TP-Link_71FA";
-const char *WIFI_PASSWORD = "46116147";
+// TODO: Replace with your WiFi credentials before flashing
+const char *WIFI_SSID     = "YOUR_WIFI_SSID";
+const char *WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
 // --- Serveur API ---
-const char *SERVER_BASE = "http://192.168.0.156/water/public/index.php";
+// TODO: Replace with your server's local IP address
+const char *SERVER_BASE = "http://YOUR_SERVER_IP/water/public/index.php";
 
 const int BORNE_ID = 1;          // ID de cette borne dans la DB
 const int WIFI_TIMEOUT = 15000;  // Timeout connexion WiFi (ms)
@@ -35,10 +37,11 @@ const int HTTP_TIMEOUT = 8000;   // Timeout requête HTTP (ms)
 const int PING_INTERVAL = 30000; // Intervalle keep-alive (30s)
 
 // --- Broker MQTT ---
-const char *MQTT_BROKER = "192.168.0.156";
+// TODO: Replace with your Mosquitto broker's IP address and credentials
+const char *MQTT_BROKER = "YOUR_SERVER_IP";
 const int MQTT_PORT = 1883;
 const char *MQTT_USER = "water_user";
-const char *MQTT_PASS = "water_pass123";
+const char *MQTT_PASS = "YOUR_MQTT_PASSWORD";
 const int MQTT_PUB_INTERVAL = 3000; // Intervalle publication état (ms)
 const unsigned long MQTT_OVERRIDE_TIMEOUT =
     300000; // Timeout de sécurité de l'override admin (5 minutes = 300000 ms)
