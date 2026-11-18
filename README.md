@@ -298,6 +298,6 @@ commandes_bornes — Remote command queue (dashboard → station)
 
 ---
 
-## 📄 License
+## 📜 License
+MIT License. Created by [Youssef Majbri](https://github.com/YoussefM-AI).
 
-This project was built as an academic / engineering prototype. No license is currently applied — contact the authors before reuse.
