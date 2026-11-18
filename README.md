@@ -301,13 +301,3 @@ commandes_bornes — Remote command queue (dashboard → station)
 ## 📄 License
 
 This project was built as an academic / engineering prototype. No license is currently applied — contact the authors before reuse.
-
----
-
-## 👥 Team
-
-| Name | Role |
-|---|---|
-| **Ghofran** | Software — PHP MVC backend, REST API, admin dashboard, MQTT worker |
-| **Nesrine** | Hardware — Hydraulics, sensors, solenoid valve, flow meter |
-| **Rania** | Hardware — Electrical cabinet, PLC integration, RFID/HMI mounting |
